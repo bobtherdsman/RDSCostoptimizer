@@ -1,0 +1,109 @@
+{
+  "name": "low-cpu-throughput-blocked",
+  "description": "CPU is low, but sustained throughput forces a larger instance/storage configuration.",
+  "currentConfig": {
+    "region": "us-east-1",
+    "instanceClass": "db.m8i.12xlarge",
+    "sqlServerEdition": "Standard",
+    "sqlServerVersion": "16.00",
+    "licenseModel": "license-included",
+    "storageType": "gp3",
+    "allocatedStorageGb": 512,
+    "provisionedIops": 30000,
+    "provisionedThroughputMbps": 1800,
+    "multiAz": false
+  },
+  "workload": {
+    "collectionHours": 168,
+    "cpuPct": {
+      "avg": 12.6,
+      "p50": 14.0,
+      "p90": 23.8,
+      "p95": 28,
+      "p99": 30.800000000000004,
+      "max": 39.199999999999996
+    },
+    "memoryPressurePct": {
+      "avg": 18.900000000000002,
+      "p50": 21.0,
+      "p90": 35.699999999999996,
+      "p95": 42,
+      "p99": 46,
+      "max": 59
+    },
+    "pageLifeExpectancySeconds": {
+      "avg": 9000,
+      "p50": 10000,
+      "p90": 12000,
+      "p95": 14000,
+      "p99": 16000,
+      "max": 18000
+    },
+    "iops": {
+      "avg": 8100.0,
+      "p50": 9000.0,
+      "p90": 15300.0,
+      "p95": 18000,
+      "p99": 19800.0,
+      "max": 25200.0
+    },
+    "throughputMbps": {
+      "avg": 652.5,
+      "p50": 725.0,
+      "p90": 1232.5,
+      "p95": 1450,
+      "p99": 1595.0000000000002,
+      "max": 2029.9999999999998
+    },
+    "totalDatabaseSizeGb": 950.0,
+    "databases": [
+      {
+        "databaseName": "analytics",
+        "iops": {
+          "avg": 5400.0,
+          "p50": 6000.0,
+          "p90": 10200.0,
+          "p95": 12000,
+          "p99": 13200.000000000002,
+          "max": 16800.0
+        },
+        "throughputMbps": {
+          "avg": 517.5,
+          "p50": 575.0,
+          "p90": 977.5,
+          "p95": 1150,
+          "p99": 1265.0,
+          "max": 1610.0
+        },
+        "sizeGb": 700,
+        "tempdbSharePct": 0
+      },
+      {
+        "databaseName": "etl",
+        "iops": {
+          "avg": 2700.0,
+          "p50": 3000.0,
+          "p90": 5100.0,
+          "p95": 6000,
+          "p99": 6600.000000000001,
+          "max": 8400.0
+        },
+        "throughputMbps": {
+          "avg": 135.0,
+          "p50": 150.0,
+          "p90": 255.0,
+          "p95": 300,
+          "p99": 330.0,
+          "max": 420.0
+        },
+        "sizeGb": 250,
+        "tempdbSharePct": 0
+      }
+    ]
+  },
+  "expected": {
+    "outcome": "blocked",
+    "primaryBlocker": "throughput",
+    "topDatabase": "analytics"
+  }
+}

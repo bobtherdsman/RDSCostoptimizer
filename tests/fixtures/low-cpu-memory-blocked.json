@@ -1,0 +1,109 @@
+{
+  "name": "low-cpu-memory-blocked",
+  "description": "CPU is low, but memory pressure means the smaller CPU candidate must be blocked.",
+  "currentConfig": {
+    "region": "us-east-1",
+    "instanceClass": "db.r8i.8xlarge",
+    "sqlServerEdition": "Standard",
+    "sqlServerVersion": "16.00",
+    "licenseModel": "license-included",
+    "storageType": "gp3",
+    "allocatedStorageGb": 512,
+    "provisionedIops": 3000,
+    "provisionedThroughputMbps": 125,
+    "multiAz": false
+  },
+  "workload": {
+    "collectionHours": 168,
+    "cpuPct": {
+      "avg": 8.1,
+      "p50": 9.0,
+      "p90": 15.299999999999999,
+      "p95": 18,
+      "p99": 19.8,
+      "max": 25.2
+    },
+    "memoryPressurePct": {
+      "avg": 41.4,
+      "p50": 46.0,
+      "p90": 78.2,
+      "p95": 92,
+      "p99": 100,
+      "max": 100
+    },
+    "pageLifeExpectancySeconds": {
+      "avg": 9000,
+      "p50": 10000,
+      "p90": 12000,
+      "p95": 14000,
+      "p99": 16000,
+      "max": 18000
+    },
+    "iops": {
+      "avg": 1125.0,
+      "p50": 1250.0,
+      "p90": 2125.0,
+      "p95": 2500,
+      "p99": 2750.0,
+      "max": 3500.0
+    },
+    "throughputMbps": {
+      "avg": 49.5,
+      "p50": 55.0,
+      "p90": 93.5,
+      "p95": 110,
+      "p99": 121.00000000000001,
+      "max": 154.0
+    },
+    "totalDatabaseSizeGb": 1020.0,
+    "databases": [
+      {
+        "databaseName": "warehouse",
+        "iops": {
+          "avg": 765.0,
+          "p50": 850.0,
+          "p90": 1445.0,
+          "p95": 1700,
+          "p99": 1870.0000000000002,
+          "max": 2380.0
+        },
+        "throughputMbps": {
+          "avg": 33.75,
+          "p50": 37.5,
+          "p90": 63.75,
+          "p95": 75,
+          "p99": 82.5,
+          "max": 105.0
+        },
+        "sizeGb": 900,
+        "tempdbSharePct": 0
+      },
+      {
+        "databaseName": "billing",
+        "iops": {
+          "avg": 360.0,
+          "p50": 400.0,
+          "p90": 680.0,
+          "p95": 800,
+          "p99": 880.0000000000001,
+          "max": 1120.0
+        },
+        "throughputMbps": {
+          "avg": 15.75,
+          "p50": 17.5,
+          "p90": 29.75,
+          "p95": 35,
+          "p99": 38.5,
+          "max": 49.0
+        },
+        "sizeGb": 120,
+        "tempdbSharePct": 0
+      }
+    ]
+  },
+  "expected": {
+    "outcome": "blocked",
+    "primaryBlocker": "memory",
+    "topDatabase": "warehouse"
+  }
+}

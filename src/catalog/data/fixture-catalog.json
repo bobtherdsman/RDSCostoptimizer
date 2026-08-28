@@ -1,0 +1,154 @@
+[
+  {
+    "instanceClass": "db.m8i.2xlarge",
+    "family": "m8i",
+    "size": "2xlarge",
+    "vcpu": 8,
+    "memoryGb": 32,
+    "maxIops": 40000,
+    "maxThroughputMbps": 1250,
+    "supportedEditions": [
+      "Enterprise",
+      "Standard",
+      "Web"
+    ],
+    "minSqlMajorVersion": 14,
+    "maxSqlMajorVersion": null
+  },
+  {
+    "instanceClass": "db.m8i.4xlarge",
+    "family": "m8i",
+    "size": "4xlarge",
+    "vcpu": 16,
+    "memoryGb": 64,
+    "maxIops": 50000,
+    "maxThroughputMbps": 1250,
+    "supportedEditions": [
+      "Enterprise",
+      "Standard",
+      "Web"
+    ],
+    "minSqlMajorVersion": 14,
+    "maxSqlMajorVersion": null
+  },
+  {
+    "instanceClass": "db.m8i.8xlarge",
+    "family": "m8i",
+    "size": "8xlarge",
+    "vcpu": 32,
+    "memoryGb": 128,
+    "maxIops": 80000,
+    "maxThroughputMbps": 2500,
+    "supportedEditions": [
+      "Enterprise",
+      "Standard"
+    ],
+    "minSqlMajorVersion": 14,
+    "maxSqlMajorVersion": null
+  },
+  {
+    "instanceClass": "db.r8i.2xlarge",
+    "family": "r8i",
+    "size": "2xlarge",
+    "vcpu": 8,
+    "memoryGb": 64,
+    "maxIops": 40000,
+    "maxThroughputMbps": 1250,
+    "supportedEditions": [
+      "Enterprise",
+      "Standard",
+      "Web"
+    ],
+    "minSqlMajorVersion": 14,
+    "maxSqlMajorVersion": null
+  },
+  {
+    "instanceClass": "db.r8i.4xlarge",
+    "family": "r8i",
+    "size": "4xlarge",
+    "vcpu": 16,
+    "memoryGb": 128,
+    "maxIops": 50000,
+    "maxThroughputMbps": 1250,
+    "supportedEditions": [
+      "Enterprise",
+      "Standard"
+    ],
+    "minSqlMajorVersion": 14,
+    "maxSqlMajorVersion": null
+  },
+  {
+    "instanceClass": "db.r8i.8xlarge",
+    "family": "r8i",
+    "size": "8xlarge",
+    "vcpu": 32,
+    "memoryGb": 256,
+    "maxIops": 80000,
+    "maxThroughputMbps": 2500,
+    "supportedEditions": [
+      "Enterprise",
+      "Standard"
+    ],
+    "minSqlMajorVersion": 14,
+    "maxSqlMajorVersion": null
+  },
+  {
+    "instanceClass": "db.x2m.4xlarge",
+    "family": "x2m",
+    "size": "4xlarge",
+    "vcpu": 16,
+    "memoryGb": 512,
+    "maxIops": 40000,
+    "maxThroughputMbps": 1250,
+    "supportedEditions": [
+      "Enterprise",
+      "Standard"
+    ],
+    "minSqlMajorVersion": 14,
+    "maxSqlMajorVersion": null
+  },
+  {
+    "instanceClass": "db.x2m.8xlarge",
+    "family": "x2m",
+    "size": "8xlarge",
+    "vcpu": 32,
+    "memoryGb": 1024,
+    "maxIops": 80000,
+    "maxThroughputMbps": 2500,
+    "supportedEditions": [
+      "Enterprise",
+      "Standard"
+    ],
+    "minSqlMajorVersion": 14,
+    "maxSqlMajorVersion": null
+  },
+  {
+    "instanceClass": "db.x2m.16xlarge",
+    "family": "x2m",
+    "size": "16xlarge",
+    "vcpu": 64,
+    "memoryGb": 2048,
+    "maxIops": 130000,
+    "maxThroughputMbps": 5000,
+    "supportedEditions": [
+      "Enterprise"
+    ],
+    "minSqlMajorVersion": 14,
+    "maxSqlMajorVersion": null
+  },
+  {
+    "instanceClass": "db.x2iedn.8xlarge",
+    "family": "x2iedn",
+    "size": "8xlarge",
+    "vcpu": 32,
+    "memoryGb": 1024,
+    "maxIops": 65000,
+    "maxThroughputMbps": 2500,
+    "supportedEditions": [
+      "Enterprise",
+      "Standard"
+    ],
+    "minSqlMajorVersion": 15,
+    "maxSqlMajorVersion": null
+  }
+]

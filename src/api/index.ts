@@ -1,0 +1,1 @@
+export const apiPlaceholder = "owner-only API surface will be implemented after contracts and harness";

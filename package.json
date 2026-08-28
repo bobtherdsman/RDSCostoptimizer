@@ -1,0 +1,19 @@
+{
+  "name": "rdscostoptimization",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone RDS SQL Server cost optimization engine and harness.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "npm run build && node --test tests/**/*.test.js && powershell -ExecutionPolicy Bypass -File tests/run-typescript-tests.ps1",
+    "harness": "node --test tests/harness/**/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "typescript": "^5.6.3"
+  }
+}

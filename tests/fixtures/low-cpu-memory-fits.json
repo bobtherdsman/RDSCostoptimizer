@@ -1,0 +1,109 @@
+{
+  "name": "low-cpu-memory-fits",
+  "description": "CPU is low and the workload should fit on a smaller candidate if catalog/orderability allows it.",
+  "currentConfig": {
+    "region": "us-east-1",
+    "instanceClass": "db.r8i.4xlarge",
+    "sqlServerEdition": "Standard",
+    "sqlServerVersion": "16.00",
+    "licenseModel": "license-included",
+    "storageType": "gp3",
+    "allocatedStorageGb": 512,
+    "provisionedIops": 3000,
+    "provisionedThroughputMbps": 125,
+    "multiAz": false
+  },
+  "workload": {
+    "collectionHours": 168,
+    "cpuPct": {
+      "avg": 9.9,
+      "p50": 11.0,
+      "p90": 18.7,
+      "p95": 22,
+      "p99": 24.200000000000003,
+      "max": 30.799999999999997
+    },
+    "memoryPressurePct": {
+      "avg": 15.75,
+      "p50": 17.5,
+      "p90": 29.75,
+      "p95": 35,
+      "p99": 38,
+      "max": 49
+    },
+    "pageLifeExpectancySeconds": {
+      "avg": 9000,
+      "p50": 10000,
+      "p90": 12000,
+      "p95": 14000,
+      "p99": 16000,
+      "max": 18000
+    },
+    "iops": {
+      "avg": 990.0,
+      "p50": 1100.0,
+      "p90": 1870.0,
+      "p95": 2200,
+      "p99": 2420.0,
+      "max": 3080.0
+    },
+    "throughputMbps": {
+      "avg": 40.5,
+      "p50": 45.0,
+      "p90": 76.5,
+      "p95": 90,
+      "p99": 99.00000000000001,
+      "max": 125.99999999999999
+    },
+    "totalDatabaseSizeGb": 220.0,
+    "databases": [
+      {
+        "databaseName": "appdb",
+        "iops": {
+          "avg": 720.0,
+          "p50": 800.0,
+          "p90": 1360.0,
+          "p95": 1600,
+          "p99": 1760.0000000000002,
+          "max": 2240.0
+        },
+        "throughputMbps": {
+          "avg": 29.25,
+          "p50": 32.5,
+          "p90": 55.25,
+          "p95": 65,
+          "p99": 71.5,
+          "max": 91.0
+        },
+        "sizeGb": 180,
+        "tempdbSharePct": 0
+      },
+      {
+        "databaseName": "admindb",
+        "iops": {
+          "avg": 270.0,
+          "p50": 300.0,
+          "p90": 510.0,
+          "p95": 600,
+          "p99": 660.0,
+          "max": 840.0
+        },
+        "throughputMbps": {
+          "avg": 11.25,
+          "p50": 12.5,
+          "p90": 21.25,
+          "p95": 25,
+          "p99": 27.500000000000004,
+          "max": 35.0
+        },
+        "sizeGb": 40,
+        "tempdbSharePct": 0
+      }
+    ]
+  },
+  "expected": {
+    "outcome": "recommendation",
+    "primaryBlocker": null,
+    "topDatabase": "appdb"
+  }
+}

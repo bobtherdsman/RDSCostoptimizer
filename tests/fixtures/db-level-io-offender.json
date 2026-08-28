@@ -1,0 +1,130 @@
+{
+  "name": "db-level-io-offender",
+  "description": "One database dominates I/O and should be highlighted for split/isolate investigation.",
+  "currentConfig": {
+    "region": "us-east-1",
+    "instanceClass": "db.r8i.4xlarge",
+    "sqlServerEdition": "Standard",
+    "sqlServerVersion": "16.00",
+    "licenseModel": "license-included",
+    "storageType": "gp3",
+    "allocatedStorageGb": 512,
+    "provisionedIops": 16000,
+    "provisionedThroughputMbps": 500,
+    "multiAz": false
+  },
+  "workload": {
+    "collectionHours": 168,
+    "cpuPct": {
+      "avg": 15.75,
+      "p50": 17.5,
+      "p90": 29.75,
+      "p95": 35,
+      "p99": 38.5,
+      "max": 49.0
+    },
+    "memoryPressurePct": {
+      "avg": 17.1,
+      "p50": 19.0,
+      "p90": 32.3,
+      "p95": 38,
+      "p99": 42,
+      "max": 53
+    },
+    "pageLifeExpectancySeconds": {
+      "avg": 9000,
+      "p50": 10000,
+      "p90": 12000,
+      "p95": 14000,
+      "p99": 16000,
+      "max": 18000
+    },
+    "iops": {
+      "avg": 6300.0,
+      "p50": 7000.0,
+      "p90": 11900.0,
+      "p95": 14000,
+      "p99": 15400.000000000002,
+      "max": 19600.0
+    },
+    "throughputMbps": {
+      "avg": 189.0,
+      "p50": 210.0,
+      "p90": 357.0,
+      "p95": 420,
+      "p99": 462.00000000000006,
+      "max": 588.0
+    },
+    "totalDatabaseSizeGb": 465.0,
+    "databases": [
+      {
+        "databaseName": "noisydb",
+        "iops": {
+          "avg": 5040.0,
+          "p50": 5600.0,
+          "p90": 9520.0,
+          "p95": 11200,
+          "p99": 12320.000000000002,
+          "max": 15679.999999999998
+        },
+        "throughputMbps": {
+          "avg": 148.5,
+          "p50": 165.0,
+          "p90": 280.5,
+          "p95": 330,
+          "p99": 363.00000000000006,
+          "max": 461.99999999999994
+        },
+        "sizeGb": 260,
+        "tempdbSharePct": 0
+      },
+      {
+        "databaseName": "coredb",
+        "iops": {
+          "avg": 855.0,
+          "p50": 950.0,
+          "p90": 1615.0,
+          "p95": 1900,
+          "p99": 2090.0,
+          "max": 2660.0
+        },
+        "throughputMbps": {
+          "avg": 29.25,
+          "p50": 32.5,
+          "p90": 55.25,
+          "p95": 65,
+          "p99": 71.5,
+          "max": 91.0
+        },
+        "sizeGb": 180,
+        "tempdbSharePct": 0
+      },
+      {
+        "databaseName": "lookupdb",
+        "iops": {
+          "avg": 405.0,
+          "p50": 450.0,
+          "p90": 765.0,
+          "p95": 900,
+          "p99": 990.0000000000001,
+          "max": 1260.0
+        },
+        "throughputMbps": {
+          "avg": 11.25,
+          "p50": 12.5,
+          "p90": 21.25,
+          "p95": 25,
+          "p99": 27.500000000000004,
+          "max": 35.0
+        },
+        "sizeGb": 25,
+        "tempdbSharePct": 0
+      }
+    ]
+  },
+  "expected": {
+    "outcome": "recommendation",
+    "primaryBlocker": null,
+    "topDatabase": "noisydb"
+  }
+}
