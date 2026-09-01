@@ -18,6 +18,14 @@ finally {
         if (-not $resolvedTmp.StartsWith($root)) {
             throw "Refusing to remove temp path outside project: $resolvedTmp"
         }
-        Remove-Item -LiteralPath $resolvedTmp -Recurse -Force
+        for ($attempt = 1; $attempt -le 5 -and (Test-Path -LiteralPath $resolvedTmp); $attempt++) {
+            try {
+                Remove-Item -LiteralPath $resolvedTmp -Recurse -Force -ErrorAction Stop
+            }
+            catch {
+                if ($attempt -eq 5) { throw }
+                Start-Sleep -Milliseconds (250 * $attempt)
+            }
+        }
     }
 }

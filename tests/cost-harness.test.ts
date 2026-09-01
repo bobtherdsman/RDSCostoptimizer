@@ -1,31 +1,50 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { CurrentRdsConfig, MetricDistribution, OptimizationResult, WorkloadProfile } from "../src/contracts/types.js";
+import type { CpuState, CurrentRdsConfig, MetricDistribution, OptimizationResult, WorkloadProfile } from "../src/contracts/types.js";
 import type { InstanceCatalogEntry } from "../src/catalog/index.js";
 import { assertHarnessPassed, runCostHarness } from "../src/harness/index.js";
+import { optimizeComputeCandidate } from "../src/optimizer/index.js";
+import { normalizeExistingCollectorCsvs } from "../src/parser/index.js";
+import { productionWorkload } from "./production-workload.js";
 
 const catalog: InstanceCatalogEntry[] = [
   {
     instanceClass: "db.r8i.4xlarge",
+    region: "us-east-1",
     family: "r8i",
     size: "4xlarge",
     vcpu: 16,
+    sqlServerDefaultVcpuSource: "aws-processor-features",
     memoryGb: 128,
+    baselineIops: 50000,
     maxIops: 50000,
+    baselineThroughputMbps: 1250,
     maxThroughputMbps: 1250,
     supportedEditions: ["Enterprise", "Standard"],
-    minSqlMajorVersion: 14
+    minSqlMajorVersion: 14,
+    engine: "sqlserver-se",
+    engineVersion: "16.00.4125.3.v1",
+    sqlServerEdition: "Standard",
+    orderable: true
   },
   {
     instanceClass: "db.m8i.2xlarge",
+    region: "us-east-1",
     family: "m8i",
     size: "2xlarge",
     vcpu: 8,
+    sqlServerDefaultVcpuSource: "aws-processor-features",
     memoryGb: 32,
+    baselineIops: 20000,
     maxIops: 20000,
+    baselineThroughputMbps: 500,
     maxThroughputMbps: 500,
     supportedEditions: ["Enterprise", "Standard", "Web"],
-    minSqlMajorVersion: 14
+    minSqlMajorVersion: 14,
+    engine: "sqlserver-se",
+    engineVersion: "16.00.4125.3.v1",
+    sqlServerEdition: "Standard",
+    orderable: true
   }
 ];
 
@@ -33,7 +52,7 @@ const currentConfig: CurrentRdsConfig = {
   region: "us-east-1",
   instanceClass: "db.r8i.8xlarge",
   sqlServerEdition: "Standard",
-  sqlServerVersion: "16.00",
+  sqlServerVersion: "16.00.4125.3",
   licenseModel: "license-included",
   storageType: "gp3",
   allocatedStorageGb: 512,
@@ -68,23 +87,227 @@ function validResult(overrides: Partial<OptimizationResult> = {}): OptimizationR
       ...currentConfig,
       instanceClass: "db.r8i.4xlarge"
     },
-    currentMonthlyCostUsd: 1000,
-    optimizedMonthlyCostUsd: 700,
-    monthlySavingsUsd: 300,
-    annualSavingsUsd: 3600,
-    savingsPct: 30,
+    decision: "Recommended",
+    cpuState: "underutilized",
+    optimizationEvidence: {
+      currentVcpu: 32,
+      optimizedVcpu: 16,
+      cpuP95Pct: 20,
+      projectedCpuPct: 40,
+      projectedSqlCpuP95Pct: 40,
+      projectedSqlCpuP99Pct: 40,
+      projectedTotalCpuP95Pct: 40,
+      projectedTotalCpuP99Pct: 40,
+      observedOtherCpuP95Pct: 0,
+      observedOtherCpuP99Pct: 0,
+      cpuP95TargetPct: 70,
+      cpuP99SafetyLimitPct: 90,
+      totalCpuP99HardLimitPct: 90,
+      cpuExcursionSampleCount: 0,
+      cpuExcursionSamplePct: 0,
+      cpuLongestExcursionStreakSamples: 0,
+      cpuProjectionConfidence: "high",
+      cpuProjectionBasis: "same_family",
+      normalizedPerCoreCapacityFactor: 1,
+      candidateCpuConfigurationType: "default",
+      requiredMemoryGb: 96,
+      requiredIops: 6000,
+      requiredThroughputMbps: 200
+    },
     risk: "medium",
     blockers: [],
     topOffendingDatabases: workload.databases,
+    limitingResources: [],
+    candidateEvaluations: [
+      {
+        instanceClass: "db.r8i.4xlarge",
+        sqlServerVisibleVcpu: 16,
+        cpuConfigurationType: "default",
+        accepted: true,
+        selected: true,
+        decision: "Recommended",
+        passedGates: ["CPU", "MEMORY", "IOPS", "THROUGHPUT", "TEMPDB", "ORDERABILITY"],
+        failedGates: [],
+        limitingResources: []
+      }
+    ],
     passedChecks: ["CPU_TARGET_FIT", "MEMORY_FIT", "IOPS_FIT", "THROUGHPUT_FIT"],
     ...overrides
   };
 }
 
+function workloadFromCpuSamples(samples: number[]): WorkloadProfile {
+  const timestamps = samples.map((_, index) => collectorTimestamp(index));
+  const cpuCsv = [
+    "ServerName,SqlSerCpuUT,SystemIdle,OtherProCpuUT,Collectiontime",
+    ...samples.map((cpu, index) => `sql1,${cpu},${Math.max(0, 100 - cpu)},0,${timestamps[index]}`)
+  ].join("\n");
+  const memoryCsv = [
+    "ServerName,SQLCurrMemUsageMB,SQLMaxMemTargetMB,OSTotalMemoryMB,OSAVAMemoryMB,PLE,SQL_CollectionTime",
+    ...samples.map((_, index) => `sql1,1024,2048,4096,2048,1200,${timestamps[index]}`)
+  ].join("\n");
+  const ioCsv = [
+    "ServerName,Sample_ID,Database_ID,DBName,Read,Written,BRead,BWritten,TotalB,TotalIOPs,Throuput,Netpackets,CollectionTime",
+    ...samples.map((_, index) => {
+      const reads = index * 60;
+      const writes = index * 30;
+      const bytesRead = reads * 8192;
+      const bytesWritten = writes * 8192;
+      return `sql1,${index + 1},5,orders,${reads},${writes},${bytesRead},${bytesWritten},${bytesRead + bytesWritten},6000,200,0,${timestamps[index]}`;
+    })
+  ].join("\n");
+
+  return {
+    ...normalizeExistingCollectorCsvs({ cpuCsv, memoryCsv, ioCsv }),
+    collectionHours: 168,
+    evidenceWindow: undefined
+  };
+}
+
+function collectorTimestamp(index: number): string {
+  return new Date(Date.UTC(2026, 7, 1, 0, index, 0))
+    .toISOString()
+    .replace("T", " ")
+    .replace(".000Z", "");
+}
+
+function optimizeCpuScenario(scenarioWorkload: WorkloadProfile): OptimizationResult {
+  return optimizeComputeCandidate({
+    currentConfig,
+    workload: scenarioWorkload,
+    catalog,
+    orderedCandidateInstanceClasses: ["db.r8i.4xlarge"],
+    currentVcpu: 32,
+    requirements: {
+      memoryGb: 96,
+      iops: 100,
+      throughputMbps: 10
+    }
+  });
+}
+
 describe("runCostHarness", () => {
   it("passes a valid independently selected optimized size", () => {
+    const reproducibleWorkload = productionWorkload({
+      sqlCpuPct: 20,
+      currentMemoryGb: 256,
+      totalIops: 6000,
+      totalThroughputMibPerSec: 200
+    });
+    const reproducibleResult = optimizeComputeCandidate({
+      currentConfig,
+      workload: reproducibleWorkload,
+      catalog,
+      orderedCandidateInstanceClasses: ["db.r8i.4xlarge"],
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+    const findings = runCostHarness({
+      result: reproducibleResult,
+      workload: reproducibleWorkload,
+      catalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.equal(reproducibleResult.decision, "Aggressive Optimization");
+    assertHarnessPassed(findings);
+  });
+
+  it("independently rejects a recommendation backed only by generic catalog metadata", () => {
+    const genericCatalog = catalog.map((entry) => ({
+      ...entry,
+      region: undefined,
+      engine: undefined,
+      engineVersion: undefined,
+      sqlServerEdition: undefined,
+      orderable: undefined
+    }));
     const findings = runCostHarness({
       result: validResult(),
+      workload,
+      catalog: genericCatalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) =>
+      !finding.passed
+      && finding.oracle === "CO-A-ORDERABLE-CATALOG"
+      && finding.message.startsWith("EXACT_ORDERABILITY_METADATA_REQUIRED")
+    ));
+  });
+
+  it("rejects a recommendation when preserved CPU evidence is tampered after optimization", () => {
+    const reproducibleWorkload = productionWorkload({
+      sqlCpuPct: 20,
+      currentMemoryGb: 256,
+      totalIops: 6000,
+      totalThroughputMibPerSec: 200
+    });
+    const result = optimizeComputeCandidate({
+      currentConfig,
+      workload: reproducibleWorkload,
+      catalog,
+      orderedCandidateInstanceClasses: ["db.r8i.4xlarge"],
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+    const findings = runCostHarness({
+      result: {
+        ...result,
+        optimizationEvidence: {
+          ...result.optimizationEvidence!,
+          projectedSqlCpuP95Pct: 1
+        }
+      },
+      workload: reproducibleWorkload,
+      catalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) =>
+      !finding.passed && finding.oracle === "CO-RULE-CPU"
+    ));
+    assert.ok(findings.some((finding) =>
+      !finding.passed && finding.oracle === "CO-RULE-REPRODUCIBLE-RECOMMENDATION"
+    ));
+  });
+
+  it("rejects caller-tampered CPU safety thresholds", () => {
+    const base = validResult();
+    const findings = runCostHarness({
+      result: validResult({
+        optimizationEvidence: {
+          ...base.optimizationEvidence!,
+          projectedSqlCpuP95Pct: 75,
+          cpuP95TargetPct: 80
+        }
+      }),
       workload,
       catalog,
       currentConfig,
@@ -96,16 +319,162 @@ describe("runCostHarness", () => {
       }
     });
 
-    assertHarnessPassed(findings);
+    assert.ok(findings.some((finding) =>
+      !finding.passed && finding.oracle === "CO-I-CPU-FIT"
+    ));
+  });
+
+  it("validates physical IOPS P95, P99, and burst behavior from preserved evidence", () => {
+    const burstCatalog: InstanceCatalogEntry[] = [
+      {
+        ...catalog[0],
+        baselineIops: 10000,
+        maxIops: 20000,
+        maximumIopsBurstDurationMinutes: 10,
+        maximumIopsBurstEventsPer24Hours: 4
+      }
+    ];
+    const result = validResult({
+      optimizationEvidence: {
+        ...validResult().optimizationEvidence!,
+        iopsP95: 6000,
+        iopsP99: 8000,
+        iopsMax: 30000,
+        candidateBaselineIops: 10000,
+        candidateMaximumIops: 20000,
+        iopsBurstReliance: true,
+        iopsBurstEvidence: {
+          threshold: 10000,
+          excursionSampleCount: 20,
+          excursionSamplePct: 2,
+          eventCount: 2,
+          longestEventMinutes: 5,
+          eventsPer24Hours: 2
+        }
+      }
+    });
+    const findings = runCostHarness({
+      result,
+      workload,
+      catalog: burstCatalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-I-IOPS-FIT"));
+  });
+
+  it("fails physical IOPS harness validation when burst duration exceeds capability", () => {
+    const burstCatalog: InstanceCatalogEntry[] = [
+      {
+        ...catalog[0],
+        baselineIops: 10000,
+        maxIops: 20000,
+        maximumIopsBurstDurationMinutes: 4,
+        maximumIopsBurstEventsPer24Hours: 4
+      }
+    ];
+    const result = validResult({
+      optimizationEvidence: {
+        ...validResult().optimizationEvidence!,
+        iopsP95: 9000,
+        iopsP99: 15000,
+        candidateBaselineIops: 10000,
+        candidateMaximumIops: 20000,
+        iopsBurstReliance: true,
+        iopsBurstEvidence: {
+          threshold: 10000,
+          excursionSampleCount: 20,
+          excursionSamplePct: 2,
+          eventCount: 2,
+          longestEventMinutes: 5,
+          eventsPer24Hours: 2
+        }
+      }
+    });
+    const findings = runCostHarness({
+      result,
+      workload,
+      catalog: burstCatalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 9000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-I-IOPS-FIT"));
+  });
+
+  it("validates physical throughput independently from IOPS", () => {
+    const throughputCatalog: InstanceCatalogEntry[] = [
+      {
+        ...catalog[0],
+        baselineThroughputMbps: 250,
+        maxThroughputMbps: 500,
+        maximumThroughputBurstDurationMinutes: 10,
+        maximumThroughputBurstEventsPer24Hours: 4
+      }
+    ];
+    const result = validResult({
+      optimizationEvidence: {
+        ...validResult().optimizationEvidence!,
+        throughputP95: 150,
+        throughputP99: 200,
+        throughputMax: 900,
+        candidateBaselineThroughputMbps: 500,
+        candidateMaximumThroughputMbps: 500,
+        throughputBurstReliance: true,
+        throughputBurstEvidence: {
+          threshold: 250,
+          excursionSampleCount: 20,
+          excursionSamplePct: 2,
+          eventCount: 2,
+          longestEventMinutes: 5,
+          eventsPer24Hours: 2
+        }
+      }
+    });
+    const findings = runCostHarness({
+      result,
+      workload,
+      catalog: throughputCatalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 150
+      }
+    });
+
+    assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-I-THROUGHPUT-FIT"));
   });
 
   it("accepts blocked results only when blockers are explained", () => {
     const findings = runCostHarness({
       result: {
         currentConfig,
+        decision: "Not Recommended",
         risk: "blocked",
         blockers: [{ code: "MEMORY_UNDERFIT", dimension: "memory", message: "No smaller candidate fits memory." }],
         topOffendingDatabases: workload.databases,
+        limitingResources: [{
+          dimension: "memory",
+          scope: "compute",
+          status: "blocking",
+          reason: "No smaller candidate fits memory.",
+          topDatabaseName: "orders",
+          topDatabaseMetric: "advisory memory share"
+        }],
+        candidateEvaluations: [],
         passedChecks: []
       },
       workload,
@@ -136,16 +505,19 @@ describe("runCostHarness", () => {
       }
     });
 
-    assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-A-ORDERABLE-CONSTRAINTS"));
     assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-I-MEMORY-FIT"));
     assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-I-IOPS-FIT"));
     assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-I-THROUGHPUT-FIT"));
   });
 
-  it("fails when optimized cost is higher than current cost", () => {
+  it("does not fail server-level validation when database attribution evidence is unavailable", () => {
+    const serverOnlyWorkload: WorkloadProfile = {
+      ...workload,
+      databases: [{ databaseName: "server-level-only" }]
+    };
     const findings = runCostHarness({
-      result: validResult({ optimizedMonthlyCostUsd: 1200 }),
-      workload,
+      result: validResult({ topOffendingDatabases: [] }),
+      workload: serverOnlyWorkload,
       catalog,
       currentConfig,
       currentVcpu: 32,
@@ -156,7 +528,9 @@ describe("runCostHarness", () => {
       }
     });
 
-    assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-H-OPTIMIZED-COST-NOT-HIGHER"));
+    assert.ok(findings.some((finding) =>
+      finding.oracle === "CO-DB-ATTRIBUTION-PRESENT" && finding.passed
+    ));
   });
 
   it("fails when caller says SSATWeb sizing engine was used", () => {
@@ -176,4 +550,305 @@ describe("runCostHarness", () => {
 
     assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-J-INDEPENDENT-SIZING"));
   });
+
+  it("fails when SQL edition and license model combination is invalid", () => {
+    const invalidConfig: CurrentRdsConfig = {
+      ...currentConfig,
+      sqlServerEdition: "Web",
+      licenseModel: "byom"
+    };
+    const findings = runCostHarness({
+      result: validResult({
+        currentConfig: invalidConfig,
+        recommendedConfig: { ...invalidConfig, instanceClass: "db.r8i.4xlarge" }
+      }),
+      workload,
+      catalog,
+      currentConfig: invalidConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-B-LICENSE-MODEL-VALID"));
+  });
+
+  it("blocks Enterprise to Standard edition changes without an explicit eligibility audit", () => {
+    const enterpriseConfig: CurrentRdsConfig = {
+      ...currentConfig,
+      sqlServerEdition: "Enterprise"
+    };
+    const findings = runCostHarness({
+      result: validResult({
+        currentConfig: enterpriseConfig,
+        recommendedConfig: { ...enterpriseConfig, sqlServerEdition: "Standard", instanceClass: "db.r8i.4xlarge" }
+      }),
+      workload,
+      catalog,
+      currentConfig: enterpriseConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-C-EE-TO-SE-ELIGIBILITY"));
+  });
+
+  it("allows Enterprise to Standard edition changes when eligibility audit passes", () => {
+    const enterpriseConfig: CurrentRdsConfig = {
+      ...currentConfig,
+      sqlServerEdition: "Enterprise"
+    };
+    const findings = runCostHarness({
+      result: validResult({
+        currentConfig: enterpriseConfig,
+        recommendedConfig: {
+          ...enterpriseConfig,
+          sqlServerEdition: "Standard",
+          instanceClass: "db.r8i.4xlarge",
+          cpuSocketCount: 1
+        }
+      }),
+      workload,
+      catalog,
+      currentConfig: enterpriseConfig,
+      currentVcpu: 32,
+      editionChangeEligibility: {
+        eligible: true,
+        blockers: [],
+        evidence: ["Feature audit passed."]
+      },
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-C-EE-TO-SE-ELIGIBILITY"));
+  });
+
+  it("keeps retired Enterprise-to-Standard oracle out of the active harness scope", () => {
+    const enterpriseConfig: CurrentRdsConfig = {
+      ...currentConfig,
+      sqlServerEdition: "Enterprise"
+    };
+    const findings = runCostHarness({
+      result: validResult({
+        currentConfig: enterpriseConfig,
+        recommendedConfig: {
+          ...enterpriseConfig,
+          sqlServerEdition: "Standard",
+          instanceClass: "db.r8i.4xlarge",
+          cpuSocketCount: undefined
+        },
+        enterpriseToStandard: {
+          status: "eligible",
+          eligible: true,
+          targetEdition: "Standard",
+          migrationRequired: true,
+          acceptedMigrationPath: "aws_dms",
+          confirmations: {
+            vendorSupportsStandardEdition: true,
+            migrationPathAccepted: true,
+            migrationPath: "aws_dms"
+          },
+          terms: {
+            featureCompatible: { passed: true, blockers: [] },
+            vendorSupported: { passed: true, blockers: [] },
+            standardScaleLimitsFit: { passed: true, blockers: [] },
+            rdsClassVersionOrderable: { passed: true, blockers: [] },
+            migrationPathAccepted: { passed: true, blockers: [] }
+          },
+          blockers: [],
+          evidence: ["Synthetic preserved evidence for independent-oracle tamper detection."]
+        }
+      }),
+      workload,
+      catalog,
+      currentConfig: enterpriseConfig,
+      currentVcpu: 32,
+      editionChangeEligibility: {
+        eligible: true,
+        blockers: [],
+        evidence: ["Feature audit passed."]
+      },
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.every((finding) => finding.oracle !== "CO-14-EDITION"));
+  });
+
+  it("uses preserved active I/O evidence instead of the retired raw interval oracle", () => {
+    const reproducibleWorkload = productionWorkload({
+      sqlCpuPct: 20,
+      currentMemoryGb: 256,
+      totalIops: 6000,
+      totalThroughputMibPerSec: 200
+    });
+    const result = optimizeComputeCandidate({
+      currentConfig,
+      workload: reproducibleWorkload,
+      catalog,
+      orderedCandidateInstanceClasses: ["db.r8i.4xlarge"],
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+    const affectedKeys = new Set(
+      reproducibleWorkload.sampleSeries!.cpu
+        .filter((_, index) => [10, 40, 70, 100].includes(index))
+        .map((sample) => sample.sampleKey)
+    );
+    const tamperedDatabaseIo = reproducibleWorkload.sampleSeries!.databaseIo.flatMap((sample) => {
+      if (!affectedKeys.has(sample.sampleKey)) return [sample];
+      if (sample.isTempdb) return [];
+      return [{
+        ...sample,
+        readOperations: sample.readOperations + 1_000_000_000,
+        writeOperations: sample.writeOperations + 1_000_000_000,
+        bytesRead: sample.bytesRead + 1_000_000_000_000,
+        bytesWritten: sample.bytesWritten + 1_000_000_000_000
+      }];
+    });
+    const tamperedWorkload: WorkloadProfile = {
+      ...reproducibleWorkload,
+      sampleSeries: {
+        ...reproducibleWorkload.sampleSeries!,
+        databaseIo: tamperedDatabaseIo
+      }
+    };
+    const findings = runCostHarness({
+      result,
+      workload: tamperedWorkload,
+      catalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-RULE-IOPS"));
+    assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-RULE-THROUGHPUT"));
+  });
+
+  it("fails unsupported ARM/Graviton-style instance families", () => {
+    const armCatalog: InstanceCatalogEntry[] = [
+      ...catalog,
+      {
+        instanceClass: "db.r7g.2xlarge",
+        family: "r7g",
+        size: "2xlarge",
+        vcpu: 8,
+        memoryGb: 64,
+        maxIops: 40000,
+        maxThroughputMbps: 1250,
+        supportedEditions: ["Enterprise", "Standard"],
+        minSqlMajorVersion: 14
+      }
+    ];
+    const findings = runCostHarness({
+      result: validResult({ recommendedConfig: { ...currentConfig, instanceClass: "db.r7g.2xlarge" } }),
+      workload,
+      catalog: armCatalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 48,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-F-ARCHITECTURE-SUPPORTED"));
+  });
+
+  const cpuScenarios: Array<{ name: string; samples: number[]; expectedState: CpuState }> = [
+    {
+      name: "underutilized workload",
+      samples: Array.from({ length: 20 }, () => 20),
+      expectedState: "underutilized"
+    },
+    {
+      name: "normal workload",
+      samples: Array.from({ length: 20 }, () => 40),
+      expectedState: "normal"
+    },
+    {
+      name: "isolated high-CPU spike",
+      samples: [...Array.from({ length: 99 }, () => 20), 85],
+      expectedState: "underutilized"
+    },
+    {
+      name: "sustained high-CPU pressure",
+      samples: [...Array.from({ length: 10 }, () => 20), 80, 82, 85, 88, 90, ...Array.from({ length: 5 }, () => 20)],
+      expectedState: "under_pressure"
+    }
+  ];
+
+  for (const scenario of cpuScenarios) {
+    it(`independently validates CPU classification for ${scenario.name}`, () => {
+      const scenarioWorkload = workloadFromCpuSamples(scenario.samples);
+      const result = optimizeCpuScenario(scenarioWorkload);
+      const findings = runCostHarness({
+        result,
+        workload: scenarioWorkload,
+        catalog,
+        currentConfig,
+        currentVcpu: 32,
+        orderedCandidateInstanceClasses: ["db.r8i.4xlarge"],
+        requirements: {
+          memoryGb: 96,
+          iops: 100,
+          throughputMbps: 10
+        }
+      });
+
+      assert.equal(result.cpuState, scenario.expectedState);
+      assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-L-CPU-STATE-CLASSIFICATION"));
+    });
+  }
+
+  it("fails CO-L when the reported CPU state disagrees with the independent oracle", () => {
+    const scenarioWorkload = workloadFromCpuSamples(Array.from({ length: 20 }, () => 20));
+    const result = {
+      ...optimizeCpuScenario(scenarioWorkload),
+      cpuState: "normal" as const
+    };
+    const findings = runCostHarness({
+      result,
+      workload: scenarioWorkload,
+      catalog,
+      currentConfig,
+      currentVcpu: 32,
+      orderedCandidateInstanceClasses: ["db.r8i.4xlarge"],
+      requirements: {
+        memoryGb: 96,
+        iops: 100,
+        throughputMbps: 10
+      }
+    });
+
+    const classificationFinding = findings.find((finding) =>
+      !finding.passed && finding.oracle === "CO-L-CPU-STATE-CLASSIFICATION"
+    );
+    assert.equal(classificationFinding?.dimension, "cpu");
+  });
+
 });

@@ -1,86 +1,90 @@
 # Data Contracts
 
-These contracts define the standalone Cost Optimization build boundary. They are intentionally independent from SSATWeb sizing logic.
+The contracts define the standalone RDS for SQL Server workload-optimization boundary.
 
-## CurrentRdsConfig
+## Current Configuration
 
-The current RDS configuration is required to calculate actual current cost and validate legal target recommendations.
+Current facts come from collector output:
 
-Required fields:
-- `region`
-- `instanceClass`
-- `sqlServerEdition`
-- `sqlServerVersion`
-- `licenseModel`
-- `storageType`
-- `allocatedStorageGb`
-- `multiAz`
+- endpoint/`ServerName`
+- current RDS instance class
+- Region
+- SQL Server edition and exact version
+- license model
+- current SQL Server-visible vCPU
+- processor configuration when known
+- current storage and Multi-AZ facts as comparison context
 
-Optional fields:
-- `provisionedIops`
-- `provisionedThroughputMbps`
+Credentials are never part of the analysis contract.
 
-## WorkloadProfile
+## Workload Profile
 
-The workload profile is derived from uploaded collector output. It must preserve both instance-level distributions and database-level attribution.
+The workload profile preserves:
 
-Required instance-level metrics:
-- CPU percentage distribution
-- IOPS distribution
-- throughput distribution
-- collection duration
+- synchronized SQL CPU and Other CPU samples
+- synchronized memory pressure and working-set samples
+- cumulative per-file I/O counters and actual elapsed time
+- user-database and tempdb attribution
+- raw evidence needed for P50, P95, P99, maximum, burst duration, and burst frequency
+- invalid-sample and continuity evidence
+- evidence-window and representativeness state
 
-Optional instance-level metrics:
-- memory pressure distribution
-- Page Life Expectancy distribution
-- total database size
+Per-database IOPS, throughput, tempdb, and size remain available for reporting. Database CPU and memory fields are advisory only when approved low-impact evidence exists.
 
-Required DB-level shape:
-- database name
-- IOPS distribution when available
-- throughput distribution when available
-- size when available
-- tempdb share when available
+## Optimization Result
 
-DB-level CPU and memory attribution must be advisory only. They cannot be the sole basis for a recommendation.
+`OptimizationDecision` is:
 
-## OptimizationResult
+- `Recommended`
+- `Aggressive Optimization`
+- `Not Recommended`
 
-The optimizer result must make unsafe recommendations impossible to hide. If no valid optimized target exists, return a blocked result with blocker reasons.
+The result contains:
 
-Required output concepts:
-- current config
-- optional recommended config
-- risk
+- current configuration
+- optional recommended configuration
+- risk and confidence
 - blockers
-- top offending databases
 - passed checks
+- complete preserved evidence
+- every evaluated candidate and its rejection reasons
+- all limiting-resource assessments
+- top database drivers
 
-Customer-facing cost fields are optional until pricing is verified by the cost harness.
+## Limiting Resource Assessment
 
-## Fixture Envelope
+Each assessment identifies:
 
-Fixtures use this envelope:
+- dimension
+- scope
+- pass, risk, or fail status
+- requirement and capacity when applicable
+- utilization when applicable
+- reason
+- optional top database name, metric, and value
 
-```json
-{
-  "name": "case-name",
-  "description": "What the fixture proves",
-  "currentConfig": {},
-  "workload": {},
-  "expected": {
-    "outcome": "recommendation | blocked",
-    "primaryBlocker": "memory | iops | throughput | edition | orderability | storage | pricing | null",
-    "topDatabase": "database name or null"
-  }
-}
-```
-## Single-Server And Multi-Server Uploads
+Dimensions are CPU, memory, IOPS, throughput, tempdb, edition, orderability, and evidence quality.
 
-Uploads may contain one server or multiple servers. The contracts support both:
+Top database fields are populated only when collected evidence supports attribution. Orderability and evidence quality remain server-level. Missing database attribution does not remove or weaken the server-level resource result.
 
-- `ServerWorkloadInput` wraps one server name, current RDS config, and normalized workload profile.
-- `OptimizationBatchInput` contains one or more `ServerWorkloadInput` objects.
-- `OptimizationBatchResult` contains one `OptimizationResult` per server.
+## Candidate Evaluation
 
-All optimization decisions are per-server first. Fleet summaries can aggregate savings and blockers, but must not hide individual server failures or database-level offenders.
+Each candidate record preserves:
+
+- class and processor configuration
+- decision and confidence
+- whether it was selected
+- passed gates
+- failed gates
+- rejection reasons
+- limiting-resource assessments
+
+This record is the reproducibility boundary used by the independent harness.
+
+## Batch Contract
+
+One upload can contain one or multiple servers. Optimization is performed per server before a fleet summary is produced. Fleet aggregation must not hide individual blockers, resource gates, or top database drivers.
+
+## Deferred Contracts
+
+Storage-recommendation and dollar-savings contracts are absent from this phase. Current storage facts remain read-only context for instance-capability analysis; no storage provisioning recommendation is produced.

@@ -1,0 +1,30 @@
+{
+  "source": "AWS RDS for SQL Server instance store and DB instance class hardware specifications",
+  "refreshedAt": "2026-08-31",
+  "instances": {
+    "db.m5d.large": { "capacityGb": 75 },
+    "db.m5d.xlarge": { "capacityGb": 150 },
+    "db.m5d.2xlarge": { "capacityGb": 300 },
+    "db.m5d.4xlarge": { "capacityGb": 600 },
+    "db.m5d.8xlarge": { "capacityGb": 1200 },
+    "db.m5d.12xlarge": { "capacityGb": 1800 },
+    "db.m5d.16xlarge": { "capacityGb": 2400 },
+    "db.m5d.24xlarge": { "capacityGb": 3600 },
+    "db.r5d.large": { "capacityGb": 75 },
+    "db.r5d.xlarge": { "capacityGb": 150 },
+    "db.r5d.2xlarge": { "capacityGb": 300 },
+    "db.r5d.4xlarge": { "capacityGb": 600 },
+    "db.r5d.8xlarge": { "capacityGb": 1200 },
+    "db.r5d.12xlarge": { "capacityGb": 1800 },
+    "db.r5d.16xlarge": { "capacityGb": 2400 },
+    "db.r5d.24xlarge": { "capacityGb": 3600 },
+    "db.x2iedn.xlarge": { "capacityGb": 118 },
+    "db.x2iedn.2xlarge": { "capacityGb": 237 },
+    "db.x2iedn.4xlarge": { "capacityGb": 475 },
+    "db.x2iedn.8xlarge": { "capacityGb": 950 },
+    "db.x2iedn.16xlarge": { "capacityGb": 1900 },
+    "db.x2iedn.24xlarge": { "capacityGb": 2850 },
+    "db.x2iedn.32xlarge": { "capacityGb": 3800 },
+    "db.x2iedn.metal": { "capacityGb": 3800 }
+  }
+}
