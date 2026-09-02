@@ -88,6 +88,7 @@ function Get-OptionalValue {
 
 $outputpath = Resolve-CustomerOutputPath -OutputPath $outputpath -CustomerName $customername
 if (-not (Test-Path $outputpath)) { New-Item -ItemType Directory -Path $outputpath -Force | Out-Null }
+Write-Host "Cost Optimization collector package path: $PSScriptRoot" -ForegroundColor Cyan
 
 # Validation
 if (-not $cleanup -and -not $terminate -and -not $export -and -not $collectiontime) {
@@ -442,25 +443,27 @@ foreach ($serverEntry in $servers) {
                 }
             } catch { Write-Host "→ CPU Info export skipped" -ForegroundColor Gray }
             
-            try {
-                $memData = Run-Query -server $server -query "SELECT '$server' as ServerName, * FROM SQL_MemCollection ORDER BY SQL_CollectionTime"
-                if ($memData) {
-                    $memFile = Join-Path $outputpath "${serverClean}_MEM_${timestamp}.csv"
-                    $memData | Export-Csv -Path $memFile -NoTypeInformation
-                    Write-Host "→ Memory exported ($($memData.Count) rows)" -ForegroundColor Green
-                    $exportedFiles += $memFile
-                }
-            } catch { Write-Host "→ Memory export skipped" -ForegroundColor Gray }
-            
-            try {
-                $ioData = Run-Query -server $server -query "SELECT '$server' as ServerName, * FROM SQL_DBIO ORDER BY CollectionTime"
-                if ($ioData) {
-                    $ioFile = Join-Path $outputpath "${serverClean}_IO_${timestamp}.csv"
-                    $ioData | Export-Csv -Path $ioFile -NoTypeInformation
-                    Write-Host "→ IO exported ($($ioData.Count) rows)" -ForegroundColor Green
-                    $exportedFiles += $ioFile
-                }
-            } catch { Write-Host "→ IO export skipped" -ForegroundColor Gray }
+            if (-not $costoptimization) {
+                try {
+                    $memData = Run-Query -server $server -query "SELECT '$server' as ServerName, * FROM SQL_MemCollection ORDER BY SQL_CollectionTime"
+                    if ($memData) {
+                        $memFile = Join-Path $outputpath "${serverClean}_MEM_${timestamp}.csv"
+                        $memData | Export-Csv -Path $memFile -NoTypeInformation
+                        Write-Host "→ Memory exported ($($memData.Count) rows)" -ForegroundColor Green
+                        $exportedFiles += $memFile
+                    }
+                } catch { Write-Host "→ Memory export skipped" -ForegroundColor Gray }
+                
+                try {
+                    $ioData = Run-Query -server $server -query "SELECT '$server' as ServerName, * FROM SQL_DBIO ORDER BY CollectionTime"
+                    if ($ioData) {
+                        $ioFile = Join-Path $outputpath "${serverClean}_IO_${timestamp}.csv"
+                        $ioData | Export-Csv -Path $ioFile -NoTypeInformation
+                        Write-Host "→ IO exported ($($ioData.Count) rows)" -ForegroundColor Green
+                        $exportedFiles += $ioFile
+                    }
+                } catch { Write-Host "→ IO export skipped" -ForegroundColor Gray }
+            }
             try {
                 $storageData = Run-Query -server $server -query "SELECT '$server' as ServerName, ISNULL(ROUND(SUM((CAST(size AS BIGINT)*8))/1024.0/1024.0, 2), 0) AS TotalDBSizeGB FROM master.sys.master_files WHERE database_id > 4"
                 if ($storageData) {
@@ -536,25 +539,27 @@ IF (EXISTS(SELECT * FROM msdb.dbo.sysjobs WHERE (name = N'SQL_IOCollection')))
             }
         } catch { Write-Host "→ CPU Info export failed: $($_.Exception.Message)" -ForegroundColor Red }
         
-        try {
-            $memData = Run-Query -server $server -query "SELECT '$server' as ServerName, * FROM SQL_MemCollection ORDER BY SQL_CollectionTime"
-            if ($memData) {
-                $memFile = Join-Path $outputpath "${serverClean}_MEM_${timestamp}.csv"
-                $memData | Export-Csv -Path $memFile -NoTypeInformation
-                Write-Host "→ Memory exported ($($memData.Count) rows)" -ForegroundColor Green
-                $exportedFiles += $memFile
-            }
-        } catch { Write-Host "→ Memory export failed: $($_.Exception.Message)" -ForegroundColor Red }
-        
-        try {
-            $ioData = Run-Query -server $server -query "SELECT '$server' as ServerName, * FROM SQL_DBIO ORDER BY CollectionTime"
-            if ($ioData) {
-                $ioFile = Join-Path $outputpath "${serverClean}_IO_${timestamp}.csv"
-                $ioData | Export-Csv -Path $ioFile -NoTypeInformation
-                Write-Host "→ IO exported ($($ioData.Count) rows)" -ForegroundColor Green
-                $exportedFiles += $ioFile
-            }
-        } catch { Write-Host "→ IO export failed: $($_.Exception.Message)" -ForegroundColor Red }
+        if (-not $costoptimization) {
+            try {
+                $memData = Run-Query -server $server -query "SELECT '$server' as ServerName, * FROM SQL_MemCollection ORDER BY SQL_CollectionTime"
+                if ($memData) {
+                    $memFile = Join-Path $outputpath "${serverClean}_MEM_${timestamp}.csv"
+                    $memData | Export-Csv -Path $memFile -NoTypeInformation
+                    Write-Host "→ Memory exported ($($memData.Count) rows)" -ForegroundColor Green
+                    $exportedFiles += $memFile
+                }
+            } catch { Write-Host "→ Memory export failed: $($_.Exception.Message)" -ForegroundColor Red }
+            
+            try {
+                $ioData = Run-Query -server $server -query "SELECT '$server' as ServerName, * FROM SQL_DBIO ORDER BY CollectionTime"
+                if ($ioData) {
+                    $ioFile = Join-Path $outputpath "${serverClean}_IO_${timestamp}.csv"
+                    $ioData | Export-Csv -Path $ioFile -NoTypeInformation
+                    Write-Host "→ IO exported ($($ioData.Count) rows)" -ForegroundColor Green
+                    $exportedFiles += $ioFile
+                }
+            } catch { Write-Host "→ IO export failed: $($_.Exception.Message)" -ForegroundColor Red }
+        }
 
         if ($costoptimization) {
             $exportedFiles = Export-CostOptimizationTimeSeries -ServerName $server -ServerClean $serverClean -Timestamp $timestamp -OutputPath $outputpath -ExportedFiles $exportedFiles
@@ -611,6 +616,8 @@ CREATE TABLE dbo.CO_WorkloadSamples (
     MemoryGrantsOutstanding bigint NULL,
     GrantedWorkspaceMemoryKb bigint NULL,
     PhysicalMemoryInUseKb bigint NULL,
+    StolenServerMemoryMb decimal(18,2) NULL,
+    MemoryClerksData nvarchar(max) NULL,
     ProcessPhysicalMemoryLow bit NULL,
     ProcessVirtualMemoryLow bit NULL,
     SystemLowMemorySignalState bit NULL,
@@ -642,10 +649,10 @@ CREATE TABLE dbo.CO_WorkloadSamples (
     UserObjectMb decimal(18,2) NULL,
     InternalObjectMb decimal(18,2) NULL,
     VersionStoreMb decimal(18,2) NULL
-);"@
+);
+"@
 
         $costOptimizationJobSql = @"
-go
 DECLARE @CO_Sample_ID bigint = (SELECT Current_Sample_ID FROM dbo.SQL_CollectionStatus);
 DECLARE @CO_CollectionTime datetime2(3) = SYSDATETIME();
 
@@ -653,6 +660,7 @@ INSERT dbo.CO_WorkloadSamples (
     Sample_ID, CollectionTime, SampleType, SqlCommittedMemoryMb, SqlTargetMemoryMb,
     OsTotalMemoryMb, OsAvailableMemoryMb, MemoryGrantsPending,
     MemoryGrantsOutstanding, GrantedWorkspaceMemoryKb, PhysicalMemoryInUseKb,
+    StolenServerMemoryMb, MemoryClerksData,
     ProcessPhysicalMemoryLow, ProcessVirtualMemoryLow, SystemLowMemorySignalState,
     SystemHighMemorySignalState, SystemMemoryStateDesc, OverallPleSeconds,
     NumaPleJson, BufferCacheHitRatio, BufferCacheHitRatioBase,
@@ -671,6 +679,8 @@ SELECT
     (SELECT MAX(CASE WHEN counter_name = ''Memory Grants Outstanding'' THEN cntr_value END) FROM sys.dm_os_performance_counters WITH (NOLOCK) WHERE object_name LIKE ''%:Memory Manager''),
     (SELECT MAX(CASE WHEN counter_name = ''Granted Workspace Memory (KB)'' THEN cntr_value END) FROM sys.dm_os_performance_counters WITH (NOLOCK) WHERE object_name LIKE ''%:Memory Manager''),
     opm.physical_memory_in_use_kb,
+    CAST(ISNULL((SELECT MAX(cntr_value) FROM sys.dm_os_performance_counters WITH (NOLOCK) WHERE object_name LIKE ''%:Memory Manager'' AND counter_name LIKE ''%Stolen Server%''), 0) / 1024.0 AS decimal(18,2)),
+    ISNULL((SELECT TOP 15 [type] AS [ClerkType], SUM(pages_kb) / 1024 AS [SizeMb] FROM sys.dm_os_memory_clerks WITH (NOLOCK) GROUP BY [type] ORDER BY SUM(pages_kb) DESC FOR JSON PATH), N''[]''),
     opm.process_physical_memory_low,
     opm.process_virtual_memory_low,
     osm.system_low_memory_signal_state,
@@ -731,7 +741,104 @@ SELECT
     CAST(SUM(version_store_reserved_page_count) * 8.0 / 1024.0 AS decimal(18,2))
 FROM tempdb.sys.dm_db_file_space_usage WITH (NOLOCK);
 "@
+        $costOptimizationJobSql = $costOptimizationJobSql -replace "''", "'"
     }
+
+    $legacyWorkloadCreateSql = @"
+CREATE TABLE SQL_MemCollection (SQL_CollectionTime Datetime, SQLCurrMemUsageMB decimal(12,2), SQLMaxMemTargetMB int, OSTotalMemoryMB int, OSAVAMemoryMB int, PLE int, StolenServerMem int, MemoryClerksData NVARCHAR(MAX))
+CREATE TABLE SQL_DBIOTotal (Sample_ID bigint, Database_ID int, DBName nvarchar(400), [Read] bigint, [Written] bigint, BRead bigint, BWritten bigint, Throughput bigint, TotalIOPs bigint, NetPackets bigint, CollectionTime datetime)
+CREATE TABLE SQL_DBIO (Sample_ID bigint, Database_ID bigint, DBName nvarchar(400), [Read] bigint, [Written] bigint, BRead bigint, BWritten bigint, TotalB bigint, TotalIOPs bigint, Throuput bigint, Netpackets bigint, CollectionTime datetime)
+"@
+    $legacyWorkloadJobSql = @"
+    INSERT dbo.SQL_DBIOTotal
+    SELECT
+        @Current_Sample_ID,
+        d.Database_ID,
+        d.name,
+        SUM(fs.num_of_reads),
+        SUM(fs.num_of_writes),
+        SUM(fs.num_of_bytes_read),
+        SUM(fs.num_of_bytes_written),
+        SUM((fs.num_of_bytes_read) + (fs.num_of_bytes_written)),
+        SUM(fs.num_of_reads + fs.num_of_writes),
+        (select Sum(net_packet_size) as Total_net_packets_used from sys.dm_exec_connections),
+        GETDATE()
+    FROM sys.dm_io_virtual_file_stats(default, default) AS fs
+    INNER JOIN sys.databases d WITH (NOLOCK) ON d.Database_ID = fs.Database_ID
+    WHERE d.name NOT IN ('master','model','msdb','distribution','ReportServer','ReportServerTempDB')
+    and d.state = 0
+    GROUP BY d.name, d.Database_ID;
+
+    INSERT dbo.SQL_DBIO
+    SELECT
+        @Current_Sample_ID,
+        DR1.Database_ID,
+        DR1.DBName,
+        DR2.[Read] - DR1.[Read],
+        DR2.[Written] - DR1.[Written],
+        DR2.[BRead] - DR1.[BRead],
+        DR2.[BWritten] - DR1.[BWritten],
+        DR2.Throughput - DR1.Throughput,
+        DR2.TotalIOPs - DR1.TotalIOPs,
+        0,
+        DR2.NetPackets - DR1.NetPackets,
+        DR2.CollectionTime
+    FROM dbo.SQL_DBIOTotal AS DR1
+    INNER JOIN dbo.SQL_DBIOTotal AS DR2 ON DR1.Database_ID = DR2.Database_ID
+    WHERE DR1.Sample_ID = @Current_Sample_ID - 1
+    AND DR2.Sample_ID = @Current_Sample_ID;
+
+INSERT INTO SQL_MemCollection
+SELECT x.*, y.*, z.*, a.*, c.*
+FROM
+(SELECT getdate() as collectionTime, (committed_kb / 1024) as Commited, (committed_target_kb / 1024) as targetcommited FROM sys.dm_os_sys_info) as x,
+(SELECT (total_physical_memory_kb / 1024) as totalMem, (available_physical_memory_kb / 1024) as AvaiMem FROM sys.dm_os_sys_memory) as y,
+(SELECT sum(cntr_value) / count(*) as PLE FROM sys.dm_os_performance_counters WHERE counter_name like '%Page life expectancy%' AND object_name = 'SQLServer:Buffer Node') as z,
+(SELECT cntr_value / 1024 as StolenServerMem FROM sys.dm_os_performance_counters WHERE object_name = 'SQLServer:Memory Manager' AND counter_name LIKE '%Stolen Server%') as a,
+(SELECT (SELECT TOP 15 [type] AS [ClerkType], SUM(pages_kb) / 1024 AS [SizeMb] FROM sys.dm_os_memory_clerks WITH (NOLOCK) GROUP BY [type] ORDER BY SUM(pages_kb) DESC FOR JSON PATH) as MemoryClerksData) as c;
+"@
+    if ($costoptimization) {
+        $legacyWorkloadCreateSql = ""
+        $legacyWorkloadJobSql = ""
+    }
+
+    $jobCommand = @"
+SET QUOTED_IDENTIFIER ON;
+Declare @Current_Sample_ID Bigint;
+If (Select Max_Sample_ID - Current_Sample_ID from SQL_CollectionStatus) > 0
+BEGIN
+    update dbo.SQL_CollectionStatus
+    set Current_Sample_ID = Current_Sample_ID + 1;
+    Set @Current_Sample_ID = (Select Current_Sample_ID from SQL_CollectionStatus);
+$legacyWorkloadJobSql
+
+DECLARE @ts_now bigint = (SELECT ms_ticks FROM sys.dm_os_sys_info WITH (NOLOCK));
+INSERT INTO SQL_CPUCollection
+SELECT TOP(1) SQLProcessUtilization AS [SQL Server Process CPU Utilization],
+               SystemIdle AS [System Idle Process],
+               100 - SystemIdle - SQLProcessUtilization AS [Other Process CPU Utilization],
+               DATEADD(ms, -1 * (@ts_now - [timestamp]), GETDATE()) AS [Event Time]
+FROM (SELECT record.value('(./Record/@id)[1]', 'int') AS record_id,
+              record.value('(./Record/SchedulerMonitorEvent/SystemHealth/SystemIdle)[1]', 'int') AS [SystemIdle],
+              record.value('(./Record/SchedulerMonitorEvent/SystemHealth/ProcessUtilization)[1]', 'int') AS [SQLProcessUtilization],
+              [timestamp]
+      FROM (SELECT [timestamp], CONVERT(xml, record) AS [record]
+            FROM sys.dm_os_ring_buffers WITH (NOLOCK)
+            WHERE ring_buffer_type = N'RING_BUFFER_SCHEDULER_MONITOR'
+            AND record LIKE N'%<SystemHealth>%') AS x) AS y
+ORDER BY record_id DESC;
+$costOptimizationJobSql
+END
+ELSE
+BEGIN
+    update dbo.SQL_CollectionStatus
+    set [JobStatus] = 'Finished',
+    [CollectionEndTime] = GETDATE();
+    EXEC msdb.dbo.sp_update_job @job_name=N'SQL_IOCollection',
+    @enabled=0;
+END;
+"@
+    $jobCommandSql = $jobCommand.Replace("'", "''")
 
     $deployScript = @"
 -- Cleanup existing
@@ -751,10 +858,8 @@ $costOptimizationCleanupSql
 
 -- Create tables
 CREATE TABLE SQL_CPUCollection (SqlSerCpuUT int, SystemIdle int, OtherProCpuUT int, Collectiontime datetime)
-CREATE TABLE SQL_MemCollection (SQL_CollectionTime Datetime, SQLCurrMemUsageMB decimal(12,2), SQLMaxMemTargetMB int, OSTotalMemoryMB int, OSAVAMemoryMB int, PLE int, StolenServerMem int, MemoryClerksData NVARCHAR(MAX))
 CREATE TABLE SQL_CollectionStatus (JobStatus nvarchar(10), SPID int, CollectionStartTime datetime, CollectionEndTime datetime, Max_Sample_ID bigint, Current_Sample_ID bigint)
-CREATE TABLE SQL_DBIOTotal (Sample_ID bigint, Database_ID int, DBName nvarchar(400), [Read] bigint, [Written] bigint, BRead bigint, BWritten bigint, Throughput bigint, TotalIOPs bigint, NetPackets bigint, CollectionTime datetime)
-CREATE TABLE SQL_DBIO (Sample_ID bigint, Database_ID bigint, DBName nvarchar(400), [Read] bigint, [Written] bigint, BRead bigint, BWritten bigint, TotalB bigint, TotalIOPs bigint, Throuput bigint, Netpackets bigint, CollectionTime datetime)
+$legacyWorkloadCreateSql
 $costOptimizationCreateSql
 
 -- Insert status
@@ -772,7 +877,8 @@ BEGIN
 EXEC @ReturnCode = msdb.dbo.sp_add_category @class=N'JOB', @type=N'LOCAL', @name=N'[Uncategorized (Local)]'
 IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
 END
-DECLARE @CurrentLogin NVARCHAR(128) = SUSER_SNAME()
+DECLARE @CurrentLogin NVARCHAR(128)
+SELECT @CurrentLogin = SUSER_SNAME()
 DECLARE @jobId BINARY(16)
 EXEC @ReturnCode =  msdb.dbo.sp_add_job @job_name=N'SQL_IOCollection',
     @enabled=1,
@@ -794,85 +900,7 @@ EXEC @ReturnCode = msdb.dbo.sp_add_jobstep @job_id=@jobId, @step_name=N'Check_St
     @retry_attempts=0,
     @retry_interval=0,
     @os_run_priority=0, @subsystem=N'TSQL',
-    @command=N'SET QUOTED_IDENTIFIER ON
-GO 
-Declare @Current_Sample_ID Bigint
-If (Select Max_Sample_ID - Current_Sample_ID  from SQL_CollectionStatus) >  0
-BEGIN
-    update dbo.SQL_CollectionStatus
-    set Current_Sample_ID  = Current_Sample_ID  + 1
-    Set @Current_Sample_ID = (Select Current_Sample_ID from SQL_CollectionStatus);
-    INSERT dbo.SQL_DBIOTotal
-    SELECT
-        @Current_Sample_ID,
-        d.Database_ID,
-        d.name,
-        SUM(fs.num_of_reads ),
-        SUM(fs.num_of_writes),
-        SUM(fs.num_of_bytes_read ),
-        SUM(fs.num_of_bytes_written),
-        SUM((fs.num_of_bytes_read)+(fs.num_of_bytes_written)) ,
-        SUM(fs.num_of_reads + fs.num_of_writes) ,
-        (select Sum(net_packet_size) as Total_net_packets_used from sys.dm_exec_connections),
-        GETDATE()
-    FROM sys.dm_io_virtual_file_stats(default, default) AS fs
-    INNER JOIN sys.databases d (NOLOCK) ON d.Database_ID = fs.Database_ID
-    WHERE d.name NOT IN (''master'',''model'',''msdb'', ''distribution'', ''ReportServer'',''ReportServerTempDB'')
-    and d.state = 0
-    GROUP BY d.name, d.Database_ID;
-    Insert into SQL_DBIO
-    Select @Current_Sample_ID,
-        DR1.Database_ID,
-        DR1.DBName,
-        DR2.[Read] - DR1.[Read],
-        DR2.[Written] - DR1.[Written],
-        DR2.[BRead] - DR1.[BRead],
-        DR2.[BWritten] - DR1.[BWritten],
-        DR2.Throughput - DR1.Throughput,
-        DR2.TotalIOPs - DR1.TotalIOPs,
-        0,
-        DR2.NetPackets - DR1.NetPackets,
-        DR2.CollectionTime
-    from dbo.SQL_DBIOTotal as DR1
-    Inner Join dbo.SQL_DBIOTotal as DR2 ON DR1.Database_ID = DR2.Database_ID
-    where DR1.Sample_ID = @Current_Sample_ID -1
-    and DR2.Sample_ID = @Current_Sample_ID;
-END
-Else
-BEGIN
-    update dbo.SQL_CollectionStatus
-    set [JobStatus] = ''Finished'',
-    [CollectionEndTime] = GETDATE()
-    EXEC msdb.dbo.sp_update_job @job_name=N''SQL_IOCollection'',
-    @enabled=0
-END
-go
-DECLARE @ts_now bigint = (SELECT ms_ticks FROM sys.dm_os_sys_info WITH (NOLOCK)); 
-insert into SQL_CPUCollection
-SELECT TOP(1) SQLProcessUtilization AS [SQL Server Process CPU Utilization], 
-               SystemIdle AS [System Idle Process], 
-               100 - SystemIdle - SQLProcessUtilization AS [Other Process CPU Utilization], 
-               DATEADD(ms, -1 * (@ts_now - [timestamp]), GETDATE()) AS [Event Time] 
-FROM (SELECT record.value(''(./Record/@id)[1]'', ''int'') AS record_id, 
-              record.value(''(./Record/SchedulerMonitorEvent/SystemHealth/SystemIdle)[1]'',''int'') 
-                      AS [SystemIdle], 
-              record.value(''(./Record/SchedulerMonitorEvent/SystemHealth/ProcessUtilization)[1]'', ''int'') 
-                      AS [SQLProcessUtilization], [timestamp] 
-         FROM (SELECT [timestamp], CONVERT(xml, record) AS [record] 
-                      FROM sys.dm_os_ring_buffers WITH (NOLOCK)
-                      WHERE ring_buffer_type = N''RING_BUFFER_SCHEDULER_MONITOR'' 
-                      AND record LIKE N''%<SystemHealth>%'') AS x) AS y 
-ORDER BY record_id DESC
-go
-insert into SQL_MemCollection
-SELECT  x.*,y.*,z.*,a.*,c.*
-FROM 
-(SELECT getdate() as collectionTime,(committed_kb/1024) as Commited,(committed_target_kb/1024) as targetcommited FROM sys.dm_os_sys_info) as x,
-(SELECT (total_physical_memory_kb/1024) as totalMem,(available_physical_memory_kb/1024) as AvaiMem FROM sys.dm_os_sys_memory) as y,
-(SELECT sum(cntr_value)/count(*) as PLE FROM sys.dm_os_performance_counters WHERE counter_name like ''%Page life expectancy%'' AND object_name = ''SQLServer:Buffer Node'') as z,
-(SELECT cntr_value/1024 as StolenServerMem FROM sys.dm_os_performance_counters WHERE object_name = ''SQLServer:Memory Manager'' AND counter_name LIKE ''%Stolen Server%'' ) as a,
-(SELECT (SELECT TOP 15 [type] AS [ClerkType], SUM(pages_kb) / 1024 AS [SizeMb] FROM sys.dm_os_memory_clerks WITH (NOLOCK) GROUP BY [type] ORDER BY SUM(pages_kb) DESC FOR JSON PATH) as MemoryClerksData) as c
-$costOptimizationJobSql',
+    @command=N'$jobCommandSql',
     @database_name=@admindb,
     @flags=0
 IF (@@ERROR <> 0 OR @ReturnCode <> 0) GOTO QuitWithRollback
@@ -906,6 +934,13 @@ EndSave:
         Write-Host "→ Collection will run for $collectiontime minutes" -ForegroundColor Green
         $processedCount++
     } catch {
+        try {
+            $debugFile = Join-Path $outputpath ("deploy_debug_{0}_{1}.sql" -f $serverClean, (Get-Date -Format "yyyyMMdd_HHmmss"))
+            $deployScript | Out-File -FilePath $debugFile -Encoding utf8
+            Write-Host "Deploy debug SQL written to: $debugFile" -ForegroundColor Yellow
+        } catch {
+            Write-Host "Deploy debug SQL could not be written: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
         Write-Host "Failed to deploy to $server : $($_.Exception.Message)" -ForegroundColor Red
     }
 }
@@ -915,6 +950,7 @@ Write-Host "`nCompleted. Processed $processedCount server(s)." -ForegroundColor 
 if ($export -or $cleanup) {
     Write-Host "Data exported to: $outputpath" -ForegroundColor Cyan
 }
+
 
 
 

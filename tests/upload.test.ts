@@ -180,7 +180,7 @@ describe("manual upload analysis", () => {
     });
 
     assert.ok(errors.some((error) => error.code === "CPU_CSV_REQUIRED"));
-    assert.ok(errors.some((error) => error.code === "IO_CSV_REQUIRED"));
+    assert.ok(errors.some((error) => error.code === "IO_EVIDENCE_REQUIRED"));
     assert.ok(errors.some((error) => error.code === "EXISTING_INSTANCE_MISMATCH"));
     assert.ok(errors.some((error) => error.code === "CANDIDATES_REQUIRED"));
   });

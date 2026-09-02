@@ -13,8 +13,8 @@ This matrix records the completed standalone implementation after Tasks 2–16. 
 | Boundary | No SSATWeb changes or sizing dependency | Standalone catalog and optimizer; SSATWeb baseline used only as copied validation context | project boundary audit | Implemented |
 | Flow | Download, run, customer ZIP, manual upload, analyze, export | Collector and owner-only upload server | collector, upload, server, UI tests | Implemented |
 | Security | Credentials excluded from upload evidence | Non-secret manifest; login/password remain collector-run inputs | collector tests | Implemented |
-| Toggle | Extra metrics opt-in; original behavior preserved when disabled | `RunMefirst` Cost Optimization mode | collector tests | Implemented |
-| Safety | Read-only workload evidence with bounded collector lifecycle | DMV/performance-counter queries; temporary collector-owned staging/job artifacts are cleaned after export; no customer-table writes, SQL text, or row data | collector audit/tests | Implemented |
+| Toggle | Extra metrics opt-in; original behavior preserved when disabled | `RunMefirst` Cost Optimization mode; Kentra V2 skips legacy MEM/DBIO staging when Cost Optimization is enabled | collector tests | Implemented |
+| Safety | Read-only workload evidence with bounded collector lifecycle | DMV/performance-counter queries; temporary collector-owned staging/job artifacts are cleaned after export; Cost Optimization mode uses `SQL_CPUCollection` plus consolidated `CO_WorkloadSamples` and avoids overlapping legacy `SQL_MemCollection`/`SQL_DBIOTotal`/`SQL_DBIO`; no customer-table writes, SQL text, or row data | collector audit/tests | Implemented |
 | Evidence | Synchronized CPU, memory, user DB I/O, and tempdb series | Canonical sample model and parser synchronizer | parser tests | Implemented |
 | Evidence | Actual elapsed time and invalid interval handling | Counter-pair validation and elapsed-time calculations | I/O and parser tests | Implemented |
 | Window | Verified duration classifications and continuity | Evidence-window module | evidence-window tests | Implemented |

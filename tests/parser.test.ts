@@ -62,10 +62,10 @@ describe("normalizeExistingCollectorCsvs", () => {
   ].join("\n");
 
   const memorySamplesCsv = [
-    "ServerName,Sample_ID,CollectionTime,SqlCommittedMemoryMb,SqlTargetMemoryMb,OsTotalMemoryMb,OsAvailableMemoryMb,MemoryGrantsPending,MemoryGrantsOutstanding,GrantedWorkspaceMemoryKb,PhysicalMemoryInUseKb,ProcessPhysicalMemoryLow,ProcessVirtualMemoryLow,SystemLowMemorySignalState,SystemHighMemorySignalState,SystemMemoryStateDesc,OverallPleSeconds,NumaPleJson,BufferCacheHitRatio,BufferCacheHitRatioBase,PageReadsPerSec,PageWritesPerSec,LazyWritesPerSec,BatchRequestsPerSec,ColumnstoreSegmentCacheMb",
-    "sql1,1,2026-08-28 00:00:00,8000,16000,32768,12000,0,3,524288,8192000,0,0,0,1,Available physical memory is high,10000,,9950,10000,0,0,0,0,1024",
-    "sql1,2,2026-08-28 00:01:00,9000,16000,32768,11000,0,4,786432,9216000,0,0,0,1,Available physical memory is high,12000,,9960,10000,600,120,6,6000,2048",
-    "sql1,3,2026-08-28 00:02:00,10000,16000,32768,10000,0,5,1048576,10240000,0,0,0,1,Available physical memory is high,14000,,9970,10000,1200,240,12,12000,3072"
+    "ServerName,Sample_ID,CollectionTime,SqlCommittedMemoryMb,SqlTargetMemoryMb,OsTotalMemoryMb,OsAvailableMemoryMb,MemoryGrantsPending,MemoryGrantsOutstanding,GrantedWorkspaceMemoryKb,PhysicalMemoryInUseKb,StolenServerMemoryMb,MemoryClerksData,ProcessPhysicalMemoryLow,ProcessVirtualMemoryLow,SystemLowMemorySignalState,SystemHighMemorySignalState,SystemMemoryStateDesc,OverallPleSeconds,NumaPleJson,BufferCacheHitRatio,BufferCacheHitRatioBase,PageReadsPerSec,PageWritesPerSec,LazyWritesPerSec,BatchRequestsPerSec,ColumnstoreSegmentCacheMb",
+    "sql1,1,2026-08-28 00:00:00,8000,16000,32768,12000,0,3,524288,8192000,600,\"[{\"\"ClerkType\"\":\"\"MEMORYCLERK_SQLBUFFERPOOL\"\",\"\"SizeMb\"\":7000},{\"\"ClerkType\"\":\"\"MEMORYCLERK_SQLGENERAL\"\",\"\"SizeMb\"\":600}]\",0,0,0,1,Available physical memory is high,10000,,9950,10000,0,0,0,0,1024",
+    "sql1,2,2026-08-28 00:01:00,9000,16000,32768,11000,0,4,786432,9216000,700,\"[{\"\"ClerkType\"\":\"\"MEMORYCLERK_SQLBUFFERPOOL\"\",\"\"SizeMb\"\":7800},{\"\"ClerkType\"\":\"\"MEMORYCLERK_SQLGENERAL\"\",\"\"SizeMb\"\":700}]\",0,0,0,1,Available physical memory is high,12000,,9960,10000,600,120,6,6000,2048",
+    "sql1,3,2026-08-28 00:02:00,10000,16000,32768,10000,0,5,1048576,10240000,800,\"[{\"\"ClerkType\"\":\"\"MEMORYCLERK_SQLBUFFERPOOL\"\",\"\"SizeMb\"\":8500},{\"\"ClerkType\"\":\"\"MEMORYCLERK_SQLGENERAL\"\",\"\"SizeMb\"\":800}]\",0,0,0,1,Available physical memory is high,14000,,9970,10000,1200,240,12,12000,3072"
   ].join("\n");
 
   const waitStatsCsv = [
@@ -130,6 +130,29 @@ describe("normalizeExistingCollectorCsvs", () => {
   function csvCell(value: string | undefined): string {
     const raw = value ?? "";
     return /[",\r\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
+  }
+
+  function withUsCollectorTimestamps(csv: string): string {
+    return csv
+      .replaceAll("2026-08-28 00:00:00", "8/28/2026 12:00:00 AM")
+      .replaceAll("2026-08-28 00:01:00", "8/28/2026 12:01:00 AM")
+      .replaceAll("2026-08-28 00:02:00", "8/28/2026 12:02:00 AM");
+  }
+
+  function memorySamplesWithoutLegacyFloorFacts(): string {
+    const omitted = new Set(["StolenServerMemoryMb", "MemoryClerksData"]);
+    const rows = parseCsv(withUsCollectorTimestamps(memorySamplesCsv)).map((row) => {
+      const next: Record<string, string> = {};
+      for (const [key, value] of Object.entries(row)) {
+        if (!omitted.has(key)) next[key] = value;
+      }
+      return next;
+    });
+    const headers = Object.keys(rows[0]);
+    return [
+      headers.join(","),
+      ...rows.map((row) => headers.map((header) => csvCell(row[header])).join(","))
+    ].join("\n");
   }
 
   it("normalizes existing collector CPU, memory, IO, throughput, and DB attribution", () => {
@@ -197,7 +220,7 @@ describe("normalizeExistingCollectorCsvs", () => {
     assert.equal(profile.evidence?.memory?.pageReadsPerSec?.p95, 10);
     assert.equal(profile.evidence?.memory?.batchRequestsPerSec?.p95, 100);
     assert.equal(profile.sampleSeries?.memory[2].batchRequestsCounter, 12000);
-    assert.equal(profile.evidence?.memory?.bufferPoolMemoryMb?.max, 10000);
+    assert.equal(profile.evidence?.memory?.bufferPoolMemoryMb?.max, 8500);
     assert.equal(profile.evidence?.memory?.columnstoreSegmentCacheMb?.max, 3072);
     assert.equal(profile.evidence?.memory?.headroomPct, 20);
     assert.deepEqual(profile.evidence?.topDatabasesByIops, ["orders", "billing", "tempdb"]);
@@ -243,6 +266,55 @@ describe("normalizeExistingCollectorCsvs", () => {
     assert.equal(profile.evidence?.tempdbUsage?.peakAllocatedMb, 900);
     assert.equal(profile.evidence?.fileLatency.length, 3);
     assert.equal(profile.evidence?.edition?.auditComplete, true);
+  });
+
+  it("derives the memory floor from compact consolidated workload samples without legacy memory CSV", () => {
+    const profile = normalizeExistingCollectorCsvs({
+      cpuCsv,
+      workloadSamplesCsv: consolidatedWorkloadSamplesCsv(),
+      ioCsv
+    });
+
+    assert.equal(profile.sampleSeries?.memory.length, 3);
+    assert.equal(profile.evidence?.memory?.stolenServerMemoryMb?.max, 800);
+    assert.equal(profile.evidence?.memory?.bufferPoolMemoryMb?.max, 8500);
+    assert.equal(profile.evidence?.memory?.requiredMemoryFloorGb, 16.69);
+  });
+
+  it("uses legacy memory facts to supplement older Cost Optimization samples with US collector timestamps", () => {
+    const profile = normalizeExistingCollectorCsvs({
+      cpuCsv: withUsCollectorTimestamps(cpuCsv),
+      memoryCsv: withUsCollectorTimestamps(memoryCsv),
+      memorySamplesCsv: memorySamplesWithoutLegacyFloorFacts(),
+      ioCsv: withUsCollectorTimestamps(ioCsv)
+    });
+
+    assert.equal(profile.sampleSeries?.memory.length, 3);
+    assert.equal(profile.evidence?.memory?.stolenServerMemoryMb?.max, 100);
+    assert.equal(profile.evidence?.memory?.bufferPoolMemoryMb?.max, 10000);
+    assert.equal(profile.evidence?.memory?.requiredMemoryFloorGb, 15.08);
+  });
+
+  it("does not duplicate Cost Optimization samples when consolidated and split files are both present", () => {
+    const profile = normalizeExistingCollectorCsvs({
+      cpuCsv,
+      memoryCsv,
+      workloadSamplesCsv: consolidatedWorkloadSamplesCsv(),
+      memorySamplesCsv,
+      ioCsv,
+      fileIoSamplesCsv,
+      tempdbSamplesCsv
+    });
+
+    assert.equal(profile.sampleSeries?.memory.length, 3);
+    assert.equal(profile.sampleSeries?.databaseIo.length, 9);
+    assert.equal(profile.sampleSeries?.databaseIo[0].counterMode, "cumulative");
+    assert.equal(profile.physicalIo?.samples.length, 2);
+    assert.equal(profile.iops.p95, 20);
+    assert.equal(profile.evidence?.tempdbUsage?.peakAllocatedMb, 900);
+
+    const duplicateIssues = profile.sampleSeries?.issues.filter((issue) => issue.code === "duplicate_sample") ?? [];
+    assert.equal(duplicateIssues.length, 0);
   });
 
   it("ranks physical database drivers by time-integrated shares instead of independent P95", () => {
@@ -301,6 +373,29 @@ describe("normalizeExistingCollectorCsvs", () => {
     assert.equal(io[1].intervalValid, true);
     assert.equal(io[2].elapsedSeconds, 90);
     assert.equal(io[2].intervalValid, true);
+  });
+
+  it("accepts summary IOPS and throughput aliases when cumulative file I/O is unavailable", () => {
+    const summaryIopsCsv = [
+      "ServerName,Sample_ID,DBName,IOPS,ThroughputMbps,CollectionTime",
+      "sql1,1,orders,120,25,2026-08-28 00:00:00",
+      "sql1,2,orders,180,30,2026-08-28 00:01:00",
+      "sql1,3,orders,240,35,2026-08-28 00:02:00"
+    ].join("\n");
+
+    const profile = normalizeExistingCollectorCsvs({
+      cpuCsv,
+      memoryCsv,
+      ioCsv: summaryIopsCsv
+    });
+
+    assert.equal(profile.iops.p95, 234);
+    assert.equal(profile.throughputMbps.p95, 34.5);
+    const database = profile.databases[0];
+    assert.ok(database);
+    assert.ok(database.iops);
+    assert.equal(database.databaseName, "orders");
+    assert.equal(database.iops.p95, 234);
   });
 
   it("records missing, duplicate, out-of-order, reset, and invalid samples", () => {

@@ -124,138 +124,212 @@ function Add-Button {
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Kentra SQL Evidence Collector"
-$form.Size = New-Object System.Drawing.Size(940, 760)
-$form.MinimumSize = New-Object System.Drawing.Size(940, 760)
+$form.Size = New-Object System.Drawing.Size(1024, 820)
+$form.MinimumSize = New-Object System.Drawing.Size(1024, 820)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
-$form.BackColor = $colors.Panel
+$form.BackColor = [System.Drawing.Color]::FromArgb(246, 248, 251)
 $form.Font = New-Font 9
 
-$header = New-Object System.Windows.Forms.Panel
-$header.Location = New-Object System.Drawing.Point(0, 0)
-$header.Size = New-Object System.Drawing.Size(940, 92)
-$header.BackColor = [System.Drawing.Color]::FromArgb(16, 47, 82)
-$form.Controls.Add($header)
+$leftRail = New-Object System.Windows.Forms.Panel
+$leftRail.Location = New-Object System.Drawing.Point(0, 0)
+$leftRail.Size = New-Object System.Drawing.Size(246, 820)
+$leftRail.BackColor = [System.Drawing.Color]::FromArgb(12, 22, 36)
+$form.Controls.Add($leftRail)
 
-$headerAccent = New-Object System.Windows.Forms.Panel
-$headerAccent.Location = New-Object System.Drawing.Point(0, 0)
-$headerAccent.Size = New-Object System.Drawing.Size(940, 7)
-$headerAccent.BackColor = $colors.Amber
-$header.Controls.Add($headerAccent)
+$brandBlock = New-Object System.Windows.Forms.Panel
+$brandBlock.Location = New-Object System.Drawing.Point(24, 24)
+$brandBlock.Size = New-Object System.Drawing.Size(198, 118)
+$brandBlock.BackColor = [System.Drawing.Color]::FromArgb(19, 34, 53)
+$leftRail.Controls.Add($brandBlock)
 
-$brandDot1 = New-Object System.Windows.Forms.Panel
-$brandDot1.Location = New-Object System.Drawing.Point(24, 24)
-$brandDot1.Size = New-Object System.Drawing.Size(12, 12)
-$brandDot1.BackColor = $colors.Cyan
-$header.Controls.Add($brandDot1)
+$brandMark = Add-Label $brandBlock "RDS" 18 16 54 34 13 ([System.Drawing.Color]::White) ([System.Drawing.FontStyle]::Bold)
+$brandMark.TextAlign = "MiddleCenter"
+$brandMark.BackColor = $colors.Accent
+Add-Label $brandBlock "Kentra SQL Evidence Collector" 18 58 166 34 12 ([System.Drawing.Color]::White) ([System.Drawing.FontStyle]::Bold) | Out-Null
+Add-Label $brandBlock "Collector package launcher" 18 94 154 18 8 ([System.Drawing.Color]::FromArgb(151, 165, 184)) | Out-Null
 
-$brandDot2 = New-Object System.Windows.Forms.Panel
-$brandDot2.Location = New-Object System.Drawing.Point(40, 24)
-$brandDot2.Size = New-Object System.Drawing.Size(12, 12)
-$brandDot2.BackColor = $colors.Amber
-$header.Controls.Add($brandDot2)
+Add-Label $leftRail "WORKFLOW" 26 170 120 18 8 ([System.Drawing.Color]::FromArgb(128, 146, 168)) ([System.Drawing.FontStyle]::Bold) | Out-Null
 
-$brandDot3 = New-Object System.Windows.Forms.Panel
-$brandDot3.Location = New-Object System.Drawing.Point(56, 24)
-$brandDot3.Size = New-Object System.Drawing.Size(12, 12)
-$brandDot3.BackColor = $colors.Rose
-$header.Controls.Add($brandDot3)
+$stepOne = New-Object System.Windows.Forms.Panel
+$stepOne.Location = New-Object System.Drawing.Point(24, 198)
+$stepOne.Size = New-Object System.Drawing.Size(198, 64)
+$stepOne.BackColor = [System.Drawing.Color]::FromArgb(22, 43, 67)
+$leftRail.Controls.Add($stepOne)
+Add-Label $stepOne "01" 14 12 34 28 11 $colors.Cyan ([System.Drawing.FontStyle]::Bold) | Out-Null
+Add-Label $stepOne "Connect" 54 10 120 20 10 ([System.Drawing.Color]::White) ([System.Drawing.FontStyle]::Bold) | Out-Null
+Add-Label $stepOne "Endpoint or CSV credentials" 54 33 128 18 8 ([System.Drawing.Color]::FromArgb(160, 174, 194)) | Out-Null
 
-Add-Label $header "Kentra SQL Evidence Collector" 82 16 420 30 16 ([System.Drawing.Color]::White) ([System.Drawing.FontStyle]::Bold) | Out-Null
-Add-Label $header "Collect, export, and package SQL Server evidence for RDS workload optimization." 84 51 650 22 9 ([System.Drawing.Color]::FromArgb(218, 233, 247)) | Out-Null
+$stepTwo = New-Object System.Windows.Forms.Panel
+$stepTwo.Location = New-Object System.Drawing.Point(24, 274)
+$stepTwo.Size = New-Object System.Drawing.Size(198, 64)
+$stepTwo.BackColor = [System.Drawing.Color]::FromArgb(22, 43, 67)
+$leftRail.Controls.Add($stepTwo)
+Add-Label $stepTwo "02" 14 12 34 28 11 $colors.Amber ([System.Drawing.FontStyle]::Bold) | Out-Null
+Add-Label $stepTwo "Collect" 54 10 120 20 10 ([System.Drawing.Color]::White) ([System.Drawing.FontStyle]::Bold) | Out-Null
+Add-Label $stepTwo "Run bounded SQL evidence" 54 33 128 18 8 ([System.Drawing.Color]::FromArgb(160, 174, 194)) | Out-Null
 
-$lblReady = Add-Label $header "READY" 812 25 82 26 10 ([System.Drawing.Color]::White) ([System.Drawing.FontStyle]::Bold)
+$stepThree = New-Object System.Windows.Forms.Panel
+$stepThree.Location = New-Object System.Drawing.Point(24, 350)
+$stepThree.Size = New-Object System.Drawing.Size(198, 64)
+$stepThree.BackColor = [System.Drawing.Color]::FromArgb(22, 43, 67)
+$leftRail.Controls.Add($stepThree)
+Add-Label $stepThree "03" 14 12 34 28 11 $colors.Mint ([System.Drawing.FontStyle]::Bold) | Out-Null
+Add-Label $stepThree "Package" 54 10 120 20 10 ([System.Drawing.Color]::White) ([System.Drawing.FontStyle]::Bold) | Out-Null
+Add-Label $stepThree "Export customer ZIP" 54 33 128 18 8 ([System.Drawing.Color]::FromArgb(160, 174, 194)) | Out-Null
+
+$statusPanel = New-Object System.Windows.Forms.Panel
+$statusPanel.Location = New-Object System.Drawing.Point(24, 702)
+$statusPanel.Size = New-Object System.Drawing.Size(198, 76)
+$statusPanel.BackColor = [System.Drawing.Color]::FromArgb(19, 34, 53)
+$leftRail.Controls.Add($statusPanel)
+Add-Label $statusPanel "STATUS" 16 12 80 18 8 ([System.Drawing.Color]::FromArgb(151, 165, 184)) ([System.Drawing.FontStyle]::Bold) | Out-Null
+$lblReady = Add-Label $statusPanel "READY" 16 36 166 26 10 ([System.Drawing.Color]::White) ([System.Drawing.FontStyle]::Bold)
 $lblReady.TextAlign = "MiddleCenter"
 $lblReady.BackColor = $colors.Success
 
-$sourceCard = Add-Card $form 22 112 575 168 $colors.Cyan
-Add-Label $sourceCard "1. Source and authentication" 18 14 300 24 11 $colors.Ink ([System.Drawing.FontStyle]::Bold) | Out-Null
-Add-Label $sourceCard "Choose how the collector should connect and where the server list lives." 18 39 480 18 8.5 $colors.Muted | Out-Null
+$hero = New-Object System.Windows.Forms.Panel
+$hero.Location = New-Object System.Drawing.Point(272, 24)
+$hero.Size = New-Object System.Drawing.Size(710, 104)
+$hero.BackColor = [System.Drawing.Color]::FromArgb(255, 255, 255)
+$hero.BorderStyle = "FixedSingle"
+$form.Controls.Add($hero)
 
-Add-Label $sourceCard "Authentication" 18 72 116 20 9 $colors.Muted | Out-Null
+$heroAccent = New-Object System.Windows.Forms.Panel
+$heroAccent.Location = New-Object System.Drawing.Point(0, 0)
+$heroAccent.Size = New-Object System.Drawing.Size(710, 8)
+$heroAccent.BackColor = $colors.Cyan
+$hero.Controls.Add($heroAccent)
+Add-Label $hero "RDS workload evidence launcher" 24 25 390 30 17 $colors.Ink ([System.Drawing.FontStyle]::Bold) | Out-Null
+Add-Label $hero "Run the standalone SQL Server collector, then export a customer ZIP for cost optimization assessment." 26 63 560 22 9 $colors.Muted | Out-Null
+
+$safeChip = Add-Label $hero "SAFE DEFAULT: COST OPTIMIZATION OFF" 472 28 206 26 8 ([System.Drawing.Color]::White) ([System.Drawing.FontStyle]::Bold)
+$safeChip.TextAlign = "MiddleCenter"
+$safeChip.BackColor = $colors.Mint
+
+$connectionPanel = New-Object System.Windows.Forms.Panel
+$connectionPanel.Location = New-Object System.Drawing.Point(272, 150)
+$connectionPanel.Size = New-Object System.Drawing.Size(455, 232)
+$connectionPanel.BackColor = [System.Drawing.Color]::White
+$connectionPanel.BorderStyle = "FixedSingle"
+$form.Controls.Add($connectionPanel)
+Add-Label $connectionPanel "Connection" 20 16 180 24 12 $colors.Ink ([System.Drawing.FontStyle]::Bold) | Out-Null
+Add-Label $connectionPanel "Choose authentication and point the launcher at a server list or credentials CSV." 20 43 392 18 8.5 $colors.Muted | Out-Null
+
+Add-Label $connectionPanel "Authentication" 20 78 120 20 9 $colors.Muted | Out-Null
 $cmbAuth = New-Object System.Windows.Forms.ComboBox
 $cmbAuth.Items.AddRange(@("Windows (W)", "SQL Server (S)", "From CSV File"))
 $cmbAuth.SelectedIndex = 1
-$cmbAuth.Location = New-Object System.Drawing.Point(140, 69)
-$cmbAuth.Size = New-Object System.Drawing.Size(170, 24)
+$cmbAuth.Location = New-Object System.Drawing.Point(154, 75)
+$cmbAuth.Size = New-Object System.Drawing.Size(176, 24)
 $cmbAuth.DropDownStyle = "DropDownList"
-$sourceCard.Controls.Add($cmbAuth)
+$connectionPanel.Controls.Add($cmbAuth)
 
-Add-Label $sourceCard "Server list" 18 108 116 20 9 $colors.Muted | Out-Null
-$txtServer = Add-Textbox $sourceCard 140 105 360
-$btnBrowse = Add-Button $sourceCard "Browse" 508 103 48 28 $colors.Cyan
-Add-Label $sourceCard "Server name, comma list, TXT list, or CSV credentials file." 140 132 385 18 8 $colors.Muted | Out-Null
+Add-Label $connectionPanel "Login" 20 116 74 20 9 $colors.Muted | Out-Null
+$txtLogin = Add-Textbox $connectionPanel 154 113 126
+Add-Label $connectionPanel "Password" 294 116 70 20 9 $colors.Muted | Out-Null
+$txtPassword = Add-Textbox $connectionPanel 365 113 52 "" $true
 
-Add-Label $sourceCard "Login" 327 72 42 20 9 $colors.Muted | Out-Null
-$txtLogin = Add-Textbox $sourceCard 371 69 84
-Add-Label $sourceCard "Password" 462 72 64 20 9 $colors.Muted | Out-Null
-$txtPassword = Add-Textbox $sourceCard 526 69 30 "" $true
+Add-Label $connectionPanel "Server list" 20 154 120 20 9 $colors.Muted | Out-Null
+$txtServer = Add-Textbox $connectionPanel 154 151 220
+$btnBrowse = Add-Button $connectionPanel "..." 383 149 34 28 $colors.Cyan
+Add-Label $connectionPanel "Server name, comma list, TXT file, or CSV credentials file." 154 181 260 18 8 $colors.Muted | Out-Null
 
-$runCard = Add-Card $form 22 296 575 150 $colors.Violet
-Add-Label $runCard "2. Collection settings" 18 14 300 24 11 $colors.Ink ([System.Drawing.FontStyle]::Bold) | Out-Null
-Add-Label $runCard "Set the run length and SQL admin database used by Invoke-Sqlcmd." 18 39 480 18 8.5 $colors.Muted | Out-Null
+$settingsPanel = New-Object System.Windows.Forms.Panel
+$settingsPanel.Location = New-Object System.Drawing.Point(747, 150)
+$settingsPanel.Size = New-Object System.Drawing.Size(235, 232)
+$settingsPanel.BackColor = [System.Drawing.Color]::White
+$settingsPanel.BorderStyle = "FixedSingle"
+$form.Controls.Add($settingsPanel)
+Add-Label $settingsPanel "Collection" 18 16 160 24 12 $colors.Ink ([System.Drawing.FontStyle]::Bold) | Out-Null
+Add-Label $settingsPanel "Bounded run settings." 18 43 170 18 8.5 $colors.Muted | Out-Null
 
-Add-Label $runCard "Collection minutes" 18 79 120 20 9 $colors.Muted | Out-Null
-$txtTime = Add-Textbox $runCard 145 76 80 "60"
-Add-Label $runCard "Admin database" 260 79 105 20 9 $colors.Muted | Out-Null
-$txtDB = Add-Textbox $runCard 370 76 100 "msdb"
+Add-Label $settingsPanel "Minutes" 18 78 90 20 9 $colors.Muted | Out-Null
+$txtTime = Add-Textbox $settingsPanel 118 75 72 "60"
+Add-Label $settingsPanel "Admin DB" 18 116 90 20 9 $colors.Muted | Out-Null
+$txtDB = Add-Textbox $settingsPanel 118 113 72 "msdb"
 
 $chkCostOptimization = New-Object System.Windows.Forms.CheckBox
 $chkCostOptimization.Text = "Enable Cost Optimization diagnostics"
-$chkCostOptimization.Location = New-Object System.Drawing.Point(18, 114)
-$chkCostOptimization.Size = New-Object System.Drawing.Size(260, 24)
-$chkCostOptimization.Font = New-Font 9 ([System.Drawing.FontStyle]::Bold)
+$chkCostOptimization.Location = New-Object System.Drawing.Point(18, 154)
+$chkCostOptimization.Size = New-Object System.Drawing.Size(202, 24)
+$chkCostOptimization.Font = New-Font 8.5 ([System.Drawing.FontStyle]::Bold)
 $chkCostOptimization.ForeColor = $colors.Ink
 $chkCostOptimization.Checked = $false
-$chkCostOptimization.BackColor = [System.Drawing.Color]::FromArgb(244, 239, 255)
-$runCard.Controls.Add($chkCostOptimization)
-Add-Label $runCard "Off preserves original metrics. On adds verified per-minute memory, file I/O, tempdb, edition, and manifest evidence." 286 116 270 28 8 $colors.Muted | Out-Null
+$chkCostOptimization.BackColor = [System.Drawing.Color]::FromArgb(240, 253, 250)
+$settingsPanel.Controls.Add($chkCostOptimization)
+Add-Label $settingsPanel "On adds verified memory, file I/O, tempdb, edition, and manifest evidence." 18 184 200 34 8 $colors.Muted | Out-Null
 
-$outputCard = Add-Card $form 22 462 575 134 $colors.Mint
-Add-Label $outputCard "3. Output package" 18 14 300 24 11 $colors.Ink ([System.Drawing.FontStyle]::Bold) | Out-Null
-Add-Label $outputCard "Choose where exports and ZIP packages should be written." 18 39 480 18 8.5 $colors.Muted | Out-Null
+$outputPanel = New-Object System.Windows.Forms.Panel
+$outputPanel.Location = New-Object System.Drawing.Point(272, 402)
+$outputPanel.Size = New-Object System.Drawing.Size(455, 146)
+$outputPanel.BackColor = [System.Drawing.Color]::White
+$outputPanel.BorderStyle = "FixedSingle"
+$form.Controls.Add($outputPanel)
+Add-Label $outputPanel "Customer output" 20 16 180 24 12 $colors.Ink ([System.Drawing.FontStyle]::Bold) | Out-Null
+Add-Label $outputPanel "Exports are written under the selected customer directory." 20 43 360 18 8.5 $colors.Muted | Out-Null
 
-Add-Label $outputCard "Customer name" 18 72 116 20 9 $colors.Muted | Out-Null
-$txtCustomer = Add-Textbox $outputCard 140 69 154
-Add-Label $outputCard "Output folder" 18 104 116 20 9 $colors.Muted | Out-Null
-$txtOutput = Add-Textbox $outputCard 140 101 360 $scriptDir
-$btnOutputBrowse = Add-Button $outputCard "Browse" 508 99 48 28 $colors.Mint
+Add-Label $outputPanel "Customer" 20 78 100 20 9 $colors.Muted | Out-Null
+$txtCustomer = Add-Textbox $outputPanel 120 75 130
+Add-Label $outputPanel "Folder" 20 112 100 20 9 $colors.Muted | Out-Null
+$txtOutput = Add-Textbox $outputPanel 120 109 254 $scriptDir
+$btnOutputBrowse = Add-Button $outputPanel "..." 383 107 34 28 $colors.Mint
 
-$actionCard = Add-Card $form 620 112 286 302 $colors.Amber
-$actionCard.BackColor = [System.Drawing.Color]::FromArgb(255, 251, 244)
-Add-Label $actionCard "Run commands" 18 16 220 24 12 $colors.Ink ([System.Drawing.FontStyle]::Bold) | Out-Null
-Add-Label $actionCard "Use collection first, then export when the run has finished." 18 42 238 36 8.5 $colors.Muted | Out-Null
+$commandPanel = New-Object System.Windows.Forms.Panel
+$commandPanel.Location = New-Object System.Drawing.Point(747, 402)
+$commandPanel.Size = New-Object System.Drawing.Size(235, 146)
+$commandPanel.BackColor = [System.Drawing.Color]::FromArgb(255, 252, 246)
+$commandPanel.BorderStyle = "FixedSingle"
+$form.Controls.Add($commandPanel)
+Add-Label $commandPanel "Run commands" 18 14 160 24 12 $colors.Ink ([System.Drawing.FontStyle]::Bold) | Out-Null
+Add-Label $commandPanel "Collect first. Export after the run finishes." 18 40 190 18 8.5 $colors.Muted | Out-Null
 
-$btnStart = Add-Button $actionCard "Start collection" 18 86 250 42 ([System.Drawing.Color]::FromArgb(22, 130, 214))
-$btnExport = Add-Button $actionCard "Export and ZIP" 18 140 250 42 $colors.Mint
-$btnTerminate = Add-Button $actionCard "Terminate run" 18 194 118 38 $colors.Warning
-$btnCleanup = Add-Button $actionCard "Cleanup" 150 194 118 38 $colors.Danger
-$btnClose = Add-Button $actionCard "Close" 18 247 250 36 ([System.Drawing.Color]::FromArgb(98, 108, 119))
+$btnStart = Add-Button $commandPanel "Start collection" 18 70 198 32 ([System.Drawing.Color]::FromArgb(22, 130, 214))
+$btnExport = Add-Button $commandPanel "Export and ZIP" 18 108 198 32 $colors.Mint
 
-$noteCard = Add-Card $form 620 430 286 166 $colors.Rose
-$noteCard.BackColor = [System.Drawing.Color]::FromArgb(255, 247, 249)
-Add-Label $noteCard "Operational notes" 18 14 220 24 11 $colors.Ink ([System.Drawing.FontStyle]::Bold) | Out-Null
-Add-Label $noteCard "Cost Optimization diagnostics are opt-in and default off." 18 48 238 34 8.5 $colors.Muted | Out-Null
-Add-Label $noteCard "Cleanup exports and zips data, then removes collector-owned tables and the SQL_IOCollection job." 18 88 238 52 8.5 $colors.Muted | Out-Null
+$opsPanel = New-Object System.Windows.Forms.Panel
+$opsPanel.Location = New-Object System.Drawing.Point(272, 568)
+$opsPanel.Size = New-Object System.Drawing.Size(455, 100)
+$opsPanel.BackColor = [System.Drawing.Color]::FromArgb(255, 248, 250)
+$opsPanel.BorderStyle = "FixedSingle"
+$form.Controls.Add($opsPanel)
+Add-Label $opsPanel "Operational notes" 20 14 180 22 11 $colors.Ink ([System.Drawing.FontStyle]::Bold) | Out-Null
+Add-Label $opsPanel "Cost Optimization diagnostics are opt-in and default off. Cleanup exports and zips data, then removes collector-owned tables and the SQL_IOCollection job." 20 42 400 36 8.5 $colors.Muted | Out-Null
 
-$noteChip = Add-Label $noteCard "SAFE DEFAULT" 170 17 84 22 8 ([System.Drawing.Color]::White) ([System.Drawing.FontStyle]::Bold)
-$noteChip.TextAlign = "MiddleCenter"
-$noteChip.BackColor = $colors.Rose
+$maintenancePanel = New-Object System.Windows.Forms.Panel
+$maintenancePanel.Location = New-Object System.Drawing.Point(747, 568)
+$maintenancePanel.Size = New-Object System.Drawing.Size(235, 100)
+$maintenancePanel.BackColor = [System.Drawing.Color]::White
+$maintenancePanel.BorderStyle = "FixedSingle"
+$form.Controls.Add($maintenancePanel)
+Add-Label $maintenancePanel "Maintenance" 18 14 160 22 11 $colors.Ink ([System.Drawing.FontStyle]::Bold) | Out-Null
+$btnTerminate = Add-Button $maintenancePanel "Terminate" 18 46 96 32 $colors.Warning
+$btnCleanup = Add-Button $maintenancePanel "Cleanup" 122 46 96 32 $colors.Danger
+$btnClose = Add-Button $maintenancePanel "Close" 18 80 200 0 ([System.Drawing.Color]::FromArgb(98, 108, 119))
+$btnClose.Visible = $false
 
-$logCard = Add-Card $form 22 612 884 96 $colors.Accent
-Add-Label $logCard "Activity log" 14 9 140 18 9 $colors.Accent ([System.Drawing.FontStyle]::Bold) | Out-Null
+$closeLink = Add-Label $leftRail "Close launcher" 66 650 120 22 9 ([System.Drawing.Color]::FromArgb(215, 224, 235)) ([System.Drawing.FontStyle]::Bold)
+$closeLink.Cursor = [System.Windows.Forms.Cursors]::Hand
+
+$logPanel = New-Object System.Windows.Forms.Panel
+$logPanel.Location = New-Object System.Drawing.Point(272, 682)
+$logPanel.Size = New-Object System.Drawing.Size(710, 112)
+$logPanel.BackColor = [System.Drawing.Color]::FromArgb(17, 24, 31)
+$logPanel.BorderStyle = "FixedSingle"
+$form.Controls.Add($logPanel)
+Add-Label $logPanel "Activity log" 12 7 90 18 8 ([System.Drawing.Color]::FromArgb(179, 205, 230)) ([System.Drawing.FontStyle]::Bold) | Out-Null
 $txtLog = New-Object System.Windows.Forms.TextBox
-$txtLog.Location = New-Object System.Drawing.Point(14, 30)
-$txtLog.Size = New-Object System.Drawing.Size(856, 52)
+$txtLog.Location = New-Object System.Drawing.Point(106, 8)
+$txtLog.Size = New-Object System.Drawing.Size(588, 92)
 $txtLog.Multiline = $true
 $txtLog.ScrollBars = "Vertical"
 $txtLog.ReadOnly = $true
-$txtLog.BorderStyle = "FixedSingle"
+$txtLog.BorderStyle = "None"
 $txtLog.Font = New-Object System.Drawing.Font("Consolas", 8.5)
 $txtLog.BackColor = [System.Drawing.Color]::FromArgb(17, 24, 31)
 $txtLog.ForeColor = [System.Drawing.Color]::FromArgb(216, 230, 242)
-$logCard.Controls.Add($txtLog)
+$logPanel.Controls.Add($txtLog)
 
 function Write-Log {
     param([object]$Message)
@@ -449,6 +523,7 @@ $btnCleanup.Add_Click({
     }
 })
 $btnClose.Add_Click({ $form.Close() })
+$closeLink.Add_Click({ $form.Close() })
 
 Write-Log "Launcher ready."
 Write-Log "Package path: $scriptDir"

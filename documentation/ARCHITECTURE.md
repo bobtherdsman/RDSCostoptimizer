@@ -136,7 +136,8 @@ Verdict:
 - Writes all output below the selected customer directory.
 - Exports endpoint/`ServerName` and `RDSSize`, but removes credentials.
 - Produces repeated timestamped raw evidence rather than recommendation decisions.
-- Uses read-only workload evidence queries while preserving the bounded SSAT-style collector-owned staging tables and SQL Agent sampling job, with cleanup after export.
+- Uses read-only workload evidence queries while preserving the bounded SSAT-style collector-owned staging lifecycle and SQL Agent sampling job, with cleanup after export.
+- In Kentra V2 Cost Optimization mode, keeps CPU evidence in `SQL_CPUCollection` and stores memory, cumulative per-file I/O, and tempdb evidence in `dbo.CO_WorkloadSamples`; the legacy `SQL_MemCollection`, `SQL_DBIOTotal`, and `SQL_DBIO` staging/export path is skipped for that run.
 
 ### 2. Upload and Access
 
@@ -233,6 +234,7 @@ The component validates instance capability only. It does not change the custome
 ```text
 RunMefirst
   -> collector raw CSVs and non-secret manifest
+     (Kentra V2 Cost Optimization: CPU plus consolidated CO_WORKLOAD_SAMPLES)
   -> customer-named ZIP
   -> owner-only manual upload
   -> per-server parsing and synchronization

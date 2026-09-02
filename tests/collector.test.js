@@ -76,6 +76,9 @@ describe("standalone Cost Optimization collector package", () => {
         "Memory Grants Outstanding",
         "Granted Workspace Memory (KB)",
         "physical_memory_in_use_kb",
+        "StolenServerMemoryMb",
+        "MemoryClerksData",
+        "sys.dm_os_memory_clerks",
         "process_physical_memory_low",
         "process_virtual_memory_low",
         "system_low_memory_signal_state",
@@ -129,6 +132,28 @@ describe("standalone Cost Optimization collector package", () => {
       assert.match(collector, /if \(\$costoptimization\) \{\s+\$costOptimizationCleanupSql = @"/s);
       assert.match(collector, /\$costOptimizationCreateSql = @"/);
       assert.match(collector, /\$costOptimizationJobSql = @"/);
+    }
+  });
+
+  it("uses compact Cost Optimization collection without legacy MEM and DBIO staging", () => {
+    for (const file of collectorFiles.slice(2)) {
+      const collector = read(file);
+      const jobBlock = collector.match(/\$jobCommand = @"([\s\S]*?)"@\r?\n\s+\$jobCommandSql/)?.[1] ?? "";
+      const finishBranch = jobBlock.slice(jobBlock.indexOf("set [JobStatus] = 'Finished'"));
+
+      assert.match(collector, /\$legacyWorkloadCreateSql = @"/, `${file} should isolate legacy table creation`);
+      assert.match(collector, /\$legacyWorkloadJobSql = @"/, `${file} should isolate legacy MEM and DBIO collection`);
+      assert.match(collector, /if \(\$costoptimization\) \{\s+\$legacyWorkloadCreateSql = ""\s+\$legacyWorkloadJobSql = ""\s+\}/s);
+      assert.match(collector, /CREATE TABLE SQL_CPUCollection[\s\S]*CREATE TABLE SQL_CollectionStatus[\s\S]*\$legacyWorkloadCreateSql[\s\S]*\$costOptimizationCreateSql/);
+      assert.equal((collector.match(/CREATE TABLE SQL_MemCollection/g) ?? []).length, 1, `${file} should not create legacy MEM outside the conditional payload`);
+      assert.equal((collector.match(/CREATE TABLE SQL_DBIOTotal/g) ?? []).length, 1, `${file} should not create legacy DBIOTotal outside the conditional payload`);
+      assert.equal((collector.match(/CREATE TABLE SQL_DBIO \(/g) ?? []).length, 1, `${file} should not create legacy DBIO outside the conditional payload`);
+      assert.equal((collector.match(/INSERT INTO SQL_MemCollection/g) ?? []).length, 1, `${file} should not collect legacy MEM outside the conditional payload`);
+      assert.equal((collector.match(/INSERT dbo\.SQL_DBIOTotal/g) ?? []).length, 1, `${file} should not collect legacy DBIO outside the conditional payload`);
+      assert.doesNotMatch(collector, /\$jobCommand = "\$jobCommand`r`n\$costOptimizationJobSql"/);
+      assert.match(jobBlock, /\$legacyWorkloadJobSql[\s\S]*INSERT INTO SQL_CPUCollection[\s\S]*\$costOptimizationJobSql[\s\S]*END\s+ELSE/);
+      assert.equal(finishBranch.includes("INSERT INTO SQL_CPUCollection"), false, `${file} should not collect CPU after marking the job finished`);
+      assert.equal(finishBranch.includes("$costOptimizationJobSql"), false, `${file} should not collect CO samples after marking the job finished`);
     }
   });
 

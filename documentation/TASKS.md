@@ -65,6 +65,7 @@ No collector implementation begins until the current collector is checked agains
 - [x] Capture representative and peak tempdb allocated size needed for the local-instance-store capacity gate.
 - [x] Keep all additional Cost Optimization metrics behind the existing RunMefirst toggle.
 - [x] Keep original collector behavior unchanged when Cost Optimization is disabled.
+- [x] In Kentra V2 Cost Optimization mode, collect CPU plus consolidated `CO_WorkloadSamples` evidence and skip legacy `SQL_MemCollection`, `SQL_DBIOTotal`, and `SQL_DBIO` staging/export to avoid overlapping memory/I/O collection.
 - [x] Prove that workload evidence queries remain read-only, bounded, and low impact and that collector-owned staging/job artifacts are removed after export.
 - [x] Prove that no SQL text, plans, Query Store content, traces, row data, credentials, or PII are collected.
 
@@ -353,6 +354,7 @@ Source: Sections 3 through 10 and the Final Verified Kentra Algorithm.
 - [x] Replace arbitrary memory-evidence count thresholds with complete/partial/unavailable classification over the document-required memory signals.
 - [x] Preserve measured file-stall latency as raw advisory evidence without undocumented `10/20/50 ms` pass/fail judgments.
 - [x] Replace sparse multi-day regression packages with continuous collector-cadence evidence and include Batch Requests/sec.
+- [x] Compact Kentra V2 collector collection so Cost Optimization mode no longer creates, populates, or exports legacy SSAT memory/database-I/O staging tables when consolidated workload samples are enabled.
 - [x] Add regression coverage for every correction above.
 - [x] Update the verified requirements matrix only after production, harness, collector, samples, and tests prove each correction.
 

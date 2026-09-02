@@ -164,6 +164,9 @@ describe("buildWorkloadOptimizationReport", () => {
     assert.equal(report.actionPlan.some((action) => action.includes("Storage performance target")), false);
     assert.equal(report.limitingResources.length, 2);
     assert.equal(report.limitingResources[0].topDatabaseName, "orders");
+    assert.ok(report.assessmentArtifacts.some((artifact) => artifact.label === "Structured JSON evidence package"));
+    assert.ok(report.assessmentArtifacts.some((artifact) => artifact.includedSections.includes("all limiting resource gates")));
+    assert.ok(report.assessmentArtifacts.some((artifact) => artifact.includedSections.includes("defensible top database drivers")));
     assert.ok(report.pricingNote.includes("Pricing is deferred"));
     assert.equal(report.evidenceWindow?.classification, "preferred");
     assert.match(report.evidenceWindow?.representativenessStatement ?? "", /Customer must verbally confirm/);
@@ -171,7 +174,40 @@ describe("buildWorkloadOptimizationReport", () => {
     const parsed = JSON.parse(toJsonReport(report));
     assert.equal(parsed.status, "recommended");
     assert.equal(parsed.pricingDeferred, true);
+    assert.ok(parsed.assessmentArtifacts.some((artifact: { label: string }) => artifact.label === "CSV decision matrix"));
     assert.ok(parsed.whyOptimized.some((reason: string) => reason.includes("IOPS requirement")));
+  });
+
+  it("filters AWS-managed rdsadmin from customer-facing database drivers", () => {
+    const report = buildWorkloadOptimizationReport({
+      serverName: "prod-sql-01",
+      result: result({
+        topOffendingDatabases: [
+          {
+            databaseName: "rdsadmin",
+            iops: dist(9000),
+            throughputMbps: dist(400),
+            iopsSharePct: 90,
+            throughputSharePct: 90
+          },
+          {
+            databaseName: "orders",
+            iops: dist(1000),
+            throughputMbps: dist(50),
+            iopsSharePct: 10,
+            throughputSharePct: 10,
+            sizeGb: 300
+          }
+        ]
+      })
+    });
+
+    assert.deepEqual(report.topDatabaseDrivers.map((driver) => driver.databaseName), ["orders"]);
+    assert.equal(report.whyOptimized.some((line) => line.includes("rdsadmin")), false);
+    assert.equal(report.advisorySignals.some((line) => line.includes("rdsadmin")), false);
+    assert.equal(report.actionPlan.some((line) => line.includes("rdsadmin")), false);
+    assert.equal(toCsvReport(report).includes("rdsadmin"), false);
+    assert.equal(new TextDecoder().decode(toPdfExecutiveSummary(report)).includes("rdsadmin"), false);
   });
 
   it("builds a blocked report with dimension-specific action plan", () => {
@@ -211,8 +247,70 @@ describe("buildWorkloadOptimizationReport", () => {
     assert.equal(report.status, "not_recommended");
     assert.equal(report.risk, "blocked");
     assert.equal(report.recommendedConfig, undefined);
+    assert.ok(report.actionPlan[0].startsWith("Stay as is on the current instance (db.r8i.8xlarge) because"));
+    assert.ok(report.actionPlan[0].includes("Reassess only after"));
     assert.ok(report.actionPlan.some((action) => action.startsWith("Memory blocks")));
     assert.ok(report.actionPlan.some((action) => action.startsWith("IOPS blocks")));
+    assert.equal(report.actionPlan.some((action) => action.includes("CPU target does not fit")), false);
+    assert.equal(report.actionPlan.some((action) => action.startsWith("Review top database driver")), false);
+  });
+
+  it("uses specific no-optimization wording for missing evidence and orderability blockers", () => {
+    const report = buildWorkloadOptimizationReport({
+      serverName: "blocked-sql",
+      result: result({
+        recommendedConfig: undefined,
+        decision: "Not Recommended",
+        risk: "blocked",
+        blockers: [
+          {
+            code: "COLLECTION_WINDOW_TOO_SHORT",
+            dimension: "cpu",
+            message: "Observed 1.01 collected hours is below the 48 hour minimum evidence window."
+          },
+          {
+            code: "ORDERABILITY_METADATA_MISSING",
+            dimension: "orderability",
+            message: "Missing endpoint region and exact SQL Server version for orderability validation."
+          }
+        ],
+        limitingResources: [
+          {
+            dimension: "cpu",
+            scope: "compute",
+            status: "blocking",
+            reason: "Observed 1.01 collected hours is below the 48 hour minimum evidence window."
+          },
+          {
+            dimension: "orderability",
+            scope: "compute",
+            status: "blocking",
+            reason: "Missing endpoint region and exact SQL Server version for orderability validation."
+          }
+        ],
+        topOffendingDatabases: [
+          {
+            databaseName: "rdsadmin",
+            iops: dist(9000),
+            throughputMbps: dist(400),
+            iopsSharePct: 100,
+            throughputSharePct: 100
+          }
+        ],
+        passedChecks: []
+      })
+    });
+
+    assert.equal(report.status, "not_recommended");
+    assert.ok(report.actionPlan[0].includes("insufficient evidence window"));
+    assert.ok(report.actionPlan[0].includes("orderability or current-configuration issue"));
+    assert.ok(report.actionPlan[0].includes("current instance (db.r8i.8xlarge)"));
+    assert.ok(report.actionPlan[0].includes("representative collection window of at least 7 days"));
+    assert.ok(report.actionPlan[0].includes("endpoint, Region, SQL Server version, edition, current RDSSize, or orderability evidence"));
+    assert.ok(report.actionPlan.some((action) => action.includes("collect a longer representative workload window")));
+    assert.ok(report.actionPlan.some((action) => action.includes("provide the endpoint, Region, current RDSSize")));
+    assert.equal(report.actionPlan.some((action) => action.includes("rdsadmin")), false);
+    assert.equal(toCsvReport(report).includes("Review top database driver"), false);
   });
 
   it("surfaces structured memory, wait, file latency, and tempdb advisory evidence", () => {
@@ -236,6 +334,24 @@ describe("buildWorkloadOptimizationReport", () => {
               fileType: "LOG",
               writeLatencyMs: 20,
               advisory: ["Observed average write latency: 15 ms."]
+            },
+            {
+              databaseName: "tempdb",
+              fileType: "ROWS",
+              readLatencyMs: 12,
+              advisory: ["Observed average read latency: 12 ms."]
+            },
+            {
+              databaseName: "tempdb",
+              fileType: "LOG",
+              writeLatencyMs: 18,
+              advisory: ["Observed average write latency: 18 ms."]
+            },
+            {
+              databaseName: "rdsadmin",
+              fileType: "ROWS",
+              readLatencyMs: 99,
+              advisory: ["AWS-managed database latency evidence."]
             }
           ],
           tempdbUsage: {
@@ -253,10 +369,17 @@ describe("buildWorkloadOptimizationReport", () => {
     });
 
     assert.equal(report.evidence?.memory?.observedSqlMemoryMb, 10240);
-    assert.ok(report.advisorySignals.some((signal) => signal.includes("Memory pressure evidence")));
-    assert.ok(report.advisorySignals.some((signal) => signal.includes("orders LOG latency evidence")));
-    assert.ok(report.advisorySignals.some((signal) => signal.includes("tempdb drives 45%")));
-    assert.ok(report.advisorySignals.some((signal) => signal.includes("PAGEIOLATCH_SH=5000ms")));
+    assert.deepEqual(report.supportingEvidence, report.advisorySignals);
+    assert.ok(report.supportingEvidence.some((signal) => signal.includes("Memory pressure evidence")));
+    assert.ok(report.supportingEvidence.some((signal) => signal.includes("orders LOG latency evidence")));
+    assert.ok(report.supportingEvidence.some((signal) => signal.includes("tempdb drives 45%")));
+    assert.ok(report.supportingEvidence.some((signal) => signal.includes("PAGEIOLATCH_SH=5000ms")));
+    const tempdbLatency = report.supportingEvidence.filter((signal) => signal.includes("tempdb latency evidence summarized"));
+    assert.equal(tempdbLatency.length, 1);
+    assert.ok(tempdbLatency[0].includes("2 row(s)"));
+    assert.ok(tempdbLatency[0].includes("max read 12 ms"));
+    assert.ok(tempdbLatency[0].includes("max write 18 ms"));
+    assert.equal(report.supportingEvidence.some((signal) => signal.includes("rdsadmin")), false);
   });
 
   it("reports a blocked Standard opportunity separately while keeping the Enterprise downsize", () => {
@@ -350,11 +473,12 @@ describe("buildWorkloadOptimizationReport", () => {
     assert.ok(text.startsWith("%PDF-1.4"));
     assert.ok(text.includes("RDS SQL Server Workload Optimization Executive Summary"));
     assert.ok(text.includes("Pricing is deferred"));
-    assert.ok(text.includes("Why optimized"));
+    assert.ok(text.includes("Outcome: Scaled down to db.r8i.4xlarge"));
+    assert.ok(text.includes("Why scaled down"));
     assert.ok(text.includes("%%EOF"));
   });
 
-  it("builds a descriptive optimized vs not optimized fleet summary", () => {
+  it("builds a descriptive scaled-down vs stay-as-is fleet summary", () => {
     const recommended = buildWorkloadOptimizationReport({
       serverName: "optimized-sql",
       result: result()

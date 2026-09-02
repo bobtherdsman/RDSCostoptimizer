@@ -30,7 +30,7 @@ export function buildManualUploadPageView(): ManualUploadPageViewModel {
     safeguards: [
       "Cost Optimization diagnostics must be explicitly enabled in RunMefirst.",
       "Passwords are collector-only and must not appear in normalized reports.",
-      "Pricing is deferred; results show workload fit and blockers only.",
+      "Pricing is deferred; results show workload fit and evidence checks only.",
       "Recommendations must pass memory, instance IOPS, instance throughput, tempdb, edition, orderability, and independent harness checks.",
       "The current gp3/io1/io2 storage design is retained; storage provisioning optimization is outside this phase."
     ],
@@ -49,8 +49,8 @@ export function renderManualUploadPageHtml(view: ManualUploadPageViewModel = bui
         </div>
         <aside class="guide-summary" aria-label="Offering summary">
           <span class="value-label">Business decision</span>
-          <strong>Recommended, Aggressive Optimization, or Not Recommended.</strong>
-          <p class="muted">Each result explains confidence, blockers, and why a workload should or should not be changed.</p>
+          <strong>Recommended, Aggressive Optimization, or Stay As Is.</strong>
+          <p class="muted">Each result explains confidence, evidence checks, and why a workload should scale down or stay as is.</p>
         </aside>
       </section>
 
@@ -65,7 +65,7 @@ export function renderManualUploadPageHtml(view: ManualUploadPageViewModel = bui
         )}
         ${featurePanel(
           "What You Get",
-          "A concise decision package for leadership and engineering: recommendation, confidence, blockers, and exportable evidence."
+          "A concise decision package for leadership and engineering: recommendation, confidence, evidence checks, and exportable evidence."
         )}
       </section>
 
@@ -77,7 +77,7 @@ export function renderManualUploadPageHtml(view: ManualUploadPageViewModel = bui
         <div class="process-steps three-steps" aria-label="Assessment workflow">
           ${processStep("1", "Collect", "Run the standalone collector for the SQL Server workload.")}
           ${processStep("2", "Analyze", "Upload the collector package for workload-fit evaluation.")}
-          ${processStep("3", "Decide", "Review the decision, risk, blockers, and next actions.")}
+          ${processStep("3", "Decide", "Review the outcome, evidence checks, and next actions.")}
         </div>
       </section>
 
@@ -114,7 +114,7 @@ export function renderOfferingServicesPageHtml(view: ManualUploadPageViewModel =
         <aside class="guide-summary" aria-label="Service summary">
           <span class="value-label">Service scope</span>
           <strong>Collector-first workload optimization for RDS SQL Server.</strong>
-          <p class="muted">The service produces a workload-fit decision, confidence, blockers, and exportable evidence.</p>
+          <p class="muted">The service produces a workload-fit outcome, confidence, evidence checks, and exportable evidence.</p>
         </aside>
       </section>
 
@@ -173,7 +173,7 @@ export function renderAssessmentPageHtml(view: ManualUploadPageViewModel = build
         <div>
           <p class="eyebrow">Assessment workspace</p>
           <h1>Upload collector evidence and generate the workload decision.</h1>
-          <p>Use this page when the collector package is ready. The analysis returns the recommendation, confidence, blockers, and exportable evidence for review.</p>
+          <p>Use this page when the collector package is ready. The analysis returns the recommendation, confidence, evidence checks, and exportable evidence for review.</p>
           <div class="hero-actions">
             <a class="button-link success" href="/cost/collector" download="RDSCostOptimizationCollector.zip">Download Collector</a>
             <a class="button-link secondary" href="/cost">Back to Overview</a>
@@ -185,7 +185,7 @@ export function renderAssessmentPageHtml(view: ManualUploadPageViewModel = build
           <dl>
             <dt>Scope</dt><dd>RDS for SQL Server</dd>
             <dt>Input</dt><dd>Collector evidence</dd>
-            <dt>Output</dt><dd>Decision, confidence, blockers</dd>
+            <dt>Output</dt><dd>Outcome, confidence, evidence checks</dd>
             <dt>Excluded</dt><dd>Detailed pricing and storage redesign</dd>
           </dl>
         </aside>
@@ -205,19 +205,19 @@ export function renderAssessmentPageHtml(view: ManualUploadPageViewModel = build
           <div>
             <p class="section-kicker">Run the assessment</p>
             <h2 id="upload-title">Upload the completed collector package</h2>
-            <p class="muted">The analysis returns the optimization decision, confidence, blockers, and exportable business evidence.</p>
+            <p class="muted">The analysis returns the optimization outcome, confidence, evidence checks, and exportable business evidence.</p>
           </div>
-          <form method="post" action="/cost/analyze" enctype="multipart/form-data">
+          <form method="post" action="/cost/analyze" enctype="multipart/form-data" data-upload-form>
             <label class="field">
-              <span>Requester email</span>
-              <input name="requesterEmail" type="email" placeholder="owner@example.com">
+              <span>Customer name</span>
+              <input name="customerName" type="text" placeholder="Customer or account name">
             </label>
             <label class="field file-field">
               <span>Collector output ZIP</span>
               <input name="collectorPackages" type="file" multiple accept=".zip">
             </label>
-            <input name="exportFormats" type="hidden" value="json,csv,pdf">
-            <button type="submit">${escapeHtml(view.submitLabel)}</button>
+            <button type="submit" data-submit-label="${escapeAttribute(view.submitLabel)}">${escapeHtml(view.submitLabel)}</button>
+            <p class="upload-status" role="status" aria-live="polite" data-upload-status hidden></p>
           </form>
         </section>
       </section>
@@ -249,8 +249,10 @@ export function renderManualUploadResultsHtml(view: ManualUploadResultsViewModel
         ${metricTile("Total servers", view.fleet.totalServers)}
         ${metricTile("Recommended", view.fleet.recommendedServers)}
         ${metricTile("Aggressive", view.fleet.aggressiveOptimizationServers)}
-        ${metricTile("Not recommended", view.fleet.notOptimizedServers)}
+        ${metricTile("Stay as is", view.fleet.notOptimizedServers)}
       </section>
+
+      ${view.fleet.totalServers > 1 ? fleetOutcomeOverview(view) : ""}
 
       <section class="export-row" aria-label="Exports">
         ${view.exportActions.map((action) => action.available && action.href
@@ -265,16 +267,64 @@ export function renderManualUploadResultsHtml(view: ManualUploadResultsViewModel
   `);
 }
 
+function fleetOutcomeOverview(view: ManualUploadResultsViewModel): string {
+  return `
+    <section class="panel fleet-overview" aria-label="Multi-server fleet outcome">
+      <div class="fleet-overview-header">
+        <div>
+          <p class="section-kicker">Multi-server assessment</p>
+          <h2>Fleet Outcome Split</h2>
+        </div>
+        <span>${escapeHtml(String(view.fleet.totalServers))} server${view.fleet.totalServers === 1 ? "" : "s"}</span>
+      </div>
+      <div class="fleet-outcome-grid">
+        ${view.fleet.outcomeGroups.map((group) => `
+          <article class="fleet-outcome-card ${escapeAttribute(group.status)}">
+            <div class="fleet-outcome-card-top">
+              <strong>${escapeHtml(group.label)}</strong>
+              <span>${escapeHtml(String(group.count))}</span>
+            </div>
+            <p>${escapeHtml(group.summary)}</p>
+            ${group.serverNames.length > 0
+              ? `<ul>${group.serverNames.map((name) => `<li>${escapeHtml(name)}</li>`).join("")}</ul>`
+              : `<p class="muted empty-outcome">No servers in this outcome.</p>`}
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function renderServerCard(server: ServerResultsCard): string {
   return `
     <article class="panel server-card ${server.outcome}" aria-labelledby="${domId(server.serverName)}-title">
       <header class="server-header">
         <div>
-          <p class="eyebrow">${escapeHtml(server.statusLabel)} | Risk ${escapeHtml(server.riskLabel)} | CPU ${escapeHtml(server.cpuStateLabel)}</p>
+          <p class="eyebrow">${escapeHtml(server.statusLabel)}</p>
           <h2 id="${domId(server.serverName)}-title">${escapeHtml(server.serverName)}</h2>
+          <p class="decision-summary">${escapeHtml(server.decisionSummary)}</p>
         </div>
         <span class="outcome-pill">${escapeHtml(server.statusLabel)}</span>
       </header>
+
+      <section class="assessment-board" aria-label="Visual assessment result">
+        <div class="decision-panel">
+          <span class="value-label">Assessment Result</span>
+          <strong>${escapeHtml(server.statusLabel)}</strong>
+          <p>${escapeHtml(server.assessmentDetail)}</p>
+        </div>
+        <div class="metric-strip">
+          ${server.visualMetrics.map((metric) => `
+            <div class="fit-metric">
+              <span>${escapeHtml(metric.label)}</span>
+              <strong>${escapeHtml(metric.value)}</strong>
+              <small>${escapeHtml(metric.detail)}</small>
+            </div>
+          `).join("")}
+        </div>
+      </section>
+
+      ${server.assessmentNotes.length > 0 ? assessmentNotesPanel(server) : ""}
 
       <div class="comparison two-column">
         <div>
@@ -292,7 +342,7 @@ function renderServerCard(server: ServerResultsCard): string {
           ])}
         </div>
         <div>
-          <h3>Optimized</h3>
+          <h3>${escapeHtml(server.optimizedTitle)}</h3>
           ${definitionList([
             ["Instance", server.optimized.instanceClass],
             ["Edition", server.optimized.sqlServerEdition],
@@ -305,6 +355,39 @@ function renderServerCard(server: ServerResultsCard): string {
         </div>
       </div>
 
+      ${issuePanel(server)}
+      ${server.resourceGates.length > 0 ? resourceGateMatrix(server) : ""}
+      ${moreDetails(server)}
+    </article>
+  `;
+}
+
+function assessmentNotesPanel(server: ServerResultsCard): string {
+  return `
+    <section class="assessment-note-panel" aria-label="Assessment notes">
+      <h3>Assessment Notes</h3>
+      <p>These items limit a full assessment or required fallback handling during analysis.</p>
+      <ul>${server.assessmentNotes.map((note) => `<li>${escapeHtml(note)}</li>`).join("")}</ul>
+    </section>
+  `;
+}
+
+function issuePanel(server: ServerResultsCard): string {
+  const issues = unique([...server.blockers, ...server.failedChecks]);
+  if (issues.length === 0) return "";
+  const title = server.outcome === "not_recommended" ? "Reasons to Stay As Is" : "Items to Review";
+  return `
+    <section class="detail-section issue-panel critical" aria-label="${escapeAttribute(title)}">
+      <h3>${escapeHtml(title)}</h3>
+      <ul>${issues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul>
+    </section>
+  `;
+}
+
+function moreDetails(server: ServerResultsCard): string {
+  return `
+    <details class="more-details">
+      <summary>More details</summary>
       <section class="detail-section cpu-evidence">
         <h3>CPU Projection</h3>
         ${definitionList([
@@ -340,21 +423,111 @@ function renderServerCard(server: ServerResultsCard): string {
           ["Migration path", server.editionAssessment.migrationPath]
         ])}
         ${server.editionAssessment.blockers.length > 0
-          ? listSection("Edition Blockers", server.editionAssessment.blockers)
+          ? listSection("Edition Items to Review", server.editionAssessment.blockers)
           : ""}
       </section>` : ""}
 
       ${server.memoryAssessment.length > 0 ? listSection("Memory Assessment", server.memoryAssessment) : ""}
       ${server.ioAssessment.length > 0 ? listSection("Instance IOPS and Throughput", server.ioAssessment) : ""}
       ${server.tempdbAssessment.length > 0 ? listSection("tempdb Placement and Capacity", server.tempdbAssessment) : ""}
+      ${server.candidateSummary.length > 0 ? candidateSummary(server) : ""}
       ${server.limitingResources.length > 0 ? listSection("Resource Gates and Limiting Resources", server.limitingResources) : ""}
       ${server.candidateEvaluations.length > 0 ? listSection("Candidate Evaluation History", server.candidateEvaluations) : ""}
       ${server.whyOptimized.length > 0 ? listSection("Why Optimized", server.whyOptimized) : ""}
-      ${server.whyNotOptimized.length > 0 ? listSection("Why Not Optimized", server.whyNotOptimized) : ""}
+      ${server.whyNotOptimized.length > 0 ? listSection("Why Stay As Is", server.whyNotOptimized) : ""}
       ${server.topDatabaseDrivers.length > 0 ? databaseTable(server) : ""}
-      ${server.advisorySignals.length > 0 ? listSection("Advisory Signals", server.advisorySignals) : ""}
+      ${server.supportingEvidence.length > 0 ? supportingEvidenceDetails(server.supportingEvidence) : ""}
       ${server.actionPlan.length > 0 ? listSection("Action Plan", server.actionPlan) : ""}
-    </article>
+    </details>
+  `;
+}
+
+function supportingEvidenceDetails(items: readonly string[]): string {
+  return `
+    <details class="supporting-evidence">
+      <summary>Show supporting evidence</summary>
+      <section class="detail-section">
+        <h3>Supporting Evidence</h3>
+        <p class="muted">Supporting evidence is retained for analyst review; it is not the recommendation.</p>
+        <ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </section>
+    </details>
+  `;
+}
+
+function resourceGateMatrix(server: ServerResultsCard): string {
+  return `
+    <section class="detail-section resource-gate-matrix" aria-label="Workload fit checks">
+      <h3>Workload Fit Checks</h3>
+      <div class="gate-grid">
+        ${server.resourceGates.map((gate) => `
+          <article class="gate-card ${domId(gate.status)}">
+            <div class="gate-card-top">
+              <strong>${escapeHtml(gate.dimension)}</strong>
+              <span>${escapeHtml(gate.statusLabel)}</span>
+            </div>
+            ${gate.details.length > 0
+              ? definitionList(gate.details.map((detail) => [detail.label, detail.value]))
+              : ""}
+            <p>${escapeHtml(gate.reason)}</p>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function candidateSummary(server: ServerResultsCard): string {
+  return `
+    <section class="detail-section candidate-summary" aria-label="Candidate summary">
+      <h3>Candidate Summary</h3>
+      <div class="candidate-grid">
+        ${server.candidateSummary.map((candidate) => `
+          <article class="candidate-card ${escapeAttribute(candidate.state)}">
+            <div class="candidate-card-top">
+              <strong>${escapeHtml(candidate.instanceClass)}</strong>
+              <span>${escapeHtml(candidate.state)}</span>
+            </div>
+            ${definitionList([
+              ["Result", candidate.decision],
+              ["SQL-visible vCPU", candidate.visibleVcpu],
+              ["CPU configuration", candidate.cpuConfiguration],
+              ["Failed gates", candidate.failedGates]
+            ])}
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function artifactTable(title: string, artifacts: ServerResultsCard["assessmentArtifacts"]): string {
+  return `
+    <section class="table-wrap artifact-table" aria-label="${escapeAttribute(title)}">
+      <h3>${escapeHtml(title)}</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Artifact</th>
+            <th>Format</th>
+            <th>Scope</th>
+            <th>Includes</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${artifacts.map((artifact) => `
+            <tr>
+              <td>${escapeHtml(artifact.label)}</td>
+              <td>${escapeHtml(artifact.format)}</td>
+              <td>${escapeHtml(artifact.scope)}</td>
+              <td>${escapeHtml(artifact.includedSections)}</td>
+              <td>${escapeHtml(artifact.notes)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </section>
   `;
 }
 
@@ -1061,6 +1234,88 @@ function pageShell(title: string, body: string): string {
     }
     .metric span { color: var(--muted); font-size: 13px; font-weight: 750; }
     .metric strong { display: block; font-size: 32px; line-height: 1; margin-top: 8px; }
+    .fleet-overview {
+      border-top: 4px solid var(--info);
+    }
+    .fleet-overview-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: start;
+      margin-bottom: 14px;
+    }
+    .fleet-overview-header h2 {
+      margin: 0;
+      font-size: 22px;
+    }
+    .fleet-overview-header span {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+      padding: 7px 10px;
+      white-space: nowrap;
+    }
+    .fleet-outcome-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .fleet-outcome-card {
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--line-strong);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 14px;
+      min-height: 170px;
+    }
+    .fleet-outcome-card.recommended {
+      border-left-color: var(--accent);
+    }
+    .fleet-outcome-card.aggressive_optimization {
+      border-left-color: var(--warn);
+    }
+    .fleet-outcome-card.not_recommended {
+      border-left-color: var(--danger);
+    }
+    .fleet-outcome-card-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: start;
+      margin-bottom: 10px;
+    }
+    .fleet-outcome-card-top strong {
+      font-size: 16px;
+      line-height: 1.2;
+    }
+    .fleet-outcome-card-top span {
+      display: inline-grid;
+      place-items: center;
+      min-width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      font-weight: 850;
+    }
+    .fleet-outcome-card p {
+      color: var(--muted);
+      line-height: 1.45;
+      margin: 0 0 10px;
+    }
+    .fleet-outcome-card ul {
+      padding-left: 18px;
+    }
+    .fleet-outcome-card li {
+      overflow-wrap: anywhere;
+      font-weight: 650;
+    }
+    .empty-outcome {
+      font-style: italic;
+    }
     .server-card {
       position: relative;
       overflow: hidden;
@@ -1083,6 +1338,12 @@ function pageShell(title: string, body: string): string {
     }
     .server-header h2, .panel h2, .panel h3 { margin: 0 0 10px; letter-spacing: 0; }
     .server-header h2 { font-size: 24px; line-height: 1.16; overflow-wrap: anywhere; }
+    .decision-summary {
+      color: var(--muted);
+      line-height: 1.5;
+      margin: 4px 0 0;
+      max-width: 860px;
+    }
     .panel h2 { font-size: 22px; }
     .panel h3 { font-size: 15px; }
     .compare { border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; white-space: nowrap; color: var(--muted); }
@@ -1099,8 +1360,183 @@ function pageShell(title: string, body: string): string {
       padding: 7px 10px;
       white-space: nowrap;
     }
+    .server-card.not_recommended .outcome-pill,
+    .server-card.not_recommended .decision-panel,
+    .issue-panel.critical {
+      border-color: rgba(180, 35, 24, 0.38);
+      background: #fff5f3;
+    }
+    .server-card.not_recommended .outcome-pill,
+    .server-card.not_recommended .decision-panel strong,
+    .issue-panel.critical h3,
+    .issue-panel.critical li,
+    .gate-card.blocking .gate-card-top strong,
+    .gate-card.blocking .gate-card-top span,
+    .candidate-card.rejected .candidate-card-top strong,
+    .candidate-card.rejected .candidate-card-top span {
+      color: var(--danger);
+    }
+    .server-card.aggressive_optimization .outcome-pill,
+    .server-card.aggressive_optimization .decision-panel {
+      border-color: rgba(180, 83, 9, 0.34);
+      background: #fffbeb;
+    }
+    .assessment-board {
+      display: grid;
+      grid-template-columns: minmax(220px, 0.34fr) minmax(0, 0.66fr);
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .decision-panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      padding: 16px;
+      min-height: 150px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .decision-panel strong {
+      display: block;
+      font-size: 26px;
+      line-height: 1.12;
+      margin: 6px 0 8px;
+    }
+    .decision-panel p {
+      color: var(--muted);
+      font-weight: 750;
+      margin: 0;
+    }
+    .metric-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .fit-metric, .gate-card, .candidate-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 13px;
+    }
+    .fit-metric span, .fit-metric small {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      line-height: 1.35;
+    }
+    .fit-metric strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1.18;
+      margin: 8px 0 6px;
+      overflow-wrap: anywhere;
+    }
+    .assessment-note-panel {
+      border: 1px solid rgba(180, 83, 9, 0.34);
+      border-left: 4px solid var(--warn);
+      border-radius: 8px;
+      background: #fffbeb;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+    }
+    .assessment-note-panel h3 {
+      color: var(--warn);
+      margin: 0 0 6px;
+    }
+    .assessment-note-panel p {
+      color: var(--muted);
+      margin: 0 0 8px;
+      line-height: 1.45;
+      font-weight: 650;
+    }
+    .assessment-note-panel li {
+      color: #78350f;
+      font-weight: 700;
+      line-height: 1.45;
+    }
+    .gate-grid, .candidate-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .gate-card {
+      border-left: 4px solid var(--line-strong);
+    }
+    .gate-card.within-limit, .candidate-card.selected, .candidate-card.passed {
+      border-left-color: var(--accent);
+    }
+    .gate-card.risk {
+      border-left-color: var(--warn);
+    }
+    .gate-card.blocking, .candidate-card.rejected {
+      border-left-color: var(--danger);
+      background: #fffafa;
+    }
+    .gate-card.not-applicable {
+      border-left-color: var(--muted);
+    }
+    .gate-card-top, .candidate-card-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: start;
+      margin-bottom: 10px;
+    }
+    .gate-card-top strong, .candidate-card-top strong {
+      font-size: 16px;
+      line-height: 1.2;
+    }
+    .gate-card-top span, .candidate-card-top span {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 850;
+      padding: 5px 8px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .gate-card p {
+      color: var(--muted);
+      line-height: 1.45;
+      margin: 12px 0 0;
+    }
+    .gate-card dl, .candidate-card dl {
+      grid-template-columns: minmax(105px, 38%) 1fr;
+      gap: 7px 10px;
+      font-size: 13px;
+    }
     .detail-section { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 14px; }
     .detail-section h3 { margin: 0 0 10px; }
+    .more-details {
+      border-top: 1px solid var(--line);
+      margin-top: 14px;
+      padding-top: 14px;
+    }
+    .more-details summary {
+      cursor: pointer;
+      color: var(--ink);
+      font-weight: 850;
+      list-style-position: inside;
+    }
+    .more-details[open] summary {
+      margin-bottom: 4px;
+    }
+    .supporting-evidence {
+      border-top: 1px solid var(--line);
+      margin-top: 14px;
+      padding-top: 12px;
+    }
+    .supporting-evidence summary {
+      cursor: pointer;
+      font-weight: 850;
+    }
+    .supporting-evidence p {
+      line-height: 1.45;
+      margin: 0 0 10px;
+    }
     dl {
       display: grid;
       grid-template-columns: minmax(130px, 42%) 1fr;
@@ -1152,13 +1588,21 @@ function pageShell(title: string, body: string): string {
     .button-link.secondary:hover { background: var(--panel-soft); }
     .muted { color: var(--muted); }
     button:disabled { background: #a9b3bd; }
+    .upload-status {
+      margin: 12px 0 0;
+      color: var(--ink);
+      font-weight: 700;
+    }
+    form.is-submitting {
+      opacity: 0.82;
+    }
     .export-row { margin-bottom: 16px; }
     .table-wrap { overflow-x: auto; margin-top: 14px; }
     table { border-collapse: collapse; width: 100%; min-width: 720px; }
     th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 10px; vertical-align: top; }
     th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
     @media (max-width: 900px) {
-      .workspace-grid, .business-grid, .outcome-grid, .process-panel, .process-steps, .proof-strip, .persona-panel, .article-layout, .takeaway-grid, .driver-grid, .strategy-timeline, .offering-services, .service-grid, .two, .summary-grid, .comparison { grid-template-columns: 1fr; }
+      .workspace-grid, .business-grid, .outcome-grid, .process-panel, .process-steps, .proof-strip, .persona-panel, .article-layout, .takeaway-grid, .driver-grid, .strategy-timeline, .offering-services, .service-grid, .two, .summary-grid, .comparison, .assessment-board, .metric-strip, .gate-grid, .candidate-grid, .fleet-outcome-grid { grid-template-columns: 1fr; }
       .service-actions { justify-content: flex-start; }
       .article-nav { position: static; }
       .page-header, .offering-hero, .live-hero, .guide-hero { align-items: start; flex-direction: column; }
@@ -1180,6 +1624,8 @@ function pageShell(title: string, body: string): string {
       .article-section h2 { font-size: 24px; }
       .board-grid { grid-template-columns: 1fr; }
       .server-header { display: block; }
+      .fleet-overview-header { display: block; }
+      .fleet-overview-header span { display: inline-block; margin-top: 10px; }
       .outcome-pill, .compare { display: inline-block; margin-top: 10px; }
       dl { grid-template-columns: 1fr; gap: 4px; }
       dd { margin-bottom: 8px; }
@@ -1189,6 +1635,26 @@ function pageShell(title: string, body: string): string {
   </style>
 </head>
 <body>${siteHeader()}${body}
+  <script>
+    document.querySelectorAll("[data-upload-form]").forEach((form) => {
+      form.addEventListener("submit", () => {
+        const button = form.querySelector("button[type='submit']");
+        const status = form.querySelector("[data-upload-status]");
+        const files = form.querySelector("input[type='file']")?.files?.length ?? 0;
+        form.classList.add("is-submitting");
+        if (button) {
+          button.disabled = true;
+          button.textContent = files > 1 ? "Analyzing uploads..." : "Analyzing upload...";
+        }
+        if (status) {
+          status.hidden = false;
+          status.textContent = files > 1
+            ? "Uploading and analyzing collector evidence. Multi-server packages can take a short moment."
+            : "Uploading and analyzing collector evidence.";
+        }
+      });
+    });
+  </script>
 </body>
 </html>`;
 }
@@ -1340,6 +1806,10 @@ function escapeHtml(value: string): string {
 
 function escapeAttribute(value: string): string {
   return escapeHtml(value);
+}
+
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values)];
 }
 
 

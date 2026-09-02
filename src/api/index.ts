@@ -90,7 +90,11 @@ export function normalizeCollectorExcelInput(input: CollectorExcelInput): Collec
 }
 
 export function normalizeCollectorRunManifestInput(input: CollectorExcelInput): CollectorExcelInputResponse {
-  const errors = validateCollectorExcelInput(input, { requireCredentials: false });
+  const errors = validateCollectorExcelInput(input, {
+    requireCredentials: false,
+    requireExistingInstanceClass: false,
+    requireRdsEndpoint: false
+  });
   if (errors.length > 0) {
     return { ok: false, errors };
   }
@@ -101,7 +105,14 @@ export function normalizeCollectorRunManifestInput(input: CollectorExcelInput): 
   };
 }
 
-export function validateCollectorExcelInput(input: CollectorExcelInput, options: { requireCredentials?: boolean } = { requireCredentials: true }): ApiValidationError[] {
+export function validateCollectorExcelInput(
+  input: CollectorExcelInput,
+  options: { requireCredentials?: boolean; requireExistingInstanceClass?: boolean; requireRdsEndpoint?: boolean } = {
+    requireCredentials: true,
+    requireExistingInstanceClass: true,
+    requireRdsEndpoint: true
+  }
+): ApiValidationError[] {
   const errors: ApiValidationError[] = [];
   const endpoint = input.rdsEndpoint?.trim() ?? "";
   const login = input.login?.trim() ?? "";
@@ -110,7 +121,7 @@ export function validateCollectorExcelInput(input: CollectorExcelInput, options:
 
   if (!endpoint) {
     errors.push({ code: "RDS_ENDPOINT_REQUIRED", field: "rdsEndpoint", message: "RDS endpoint is required in the collector spreadsheet." });
-  } else if (!endpoint.includes(".rds.") && !endpoint.includes(".rds.amazonaws.com")) {
+  } else if (options.requireRdsEndpoint !== false && !endpoint.includes(".rds.") && !endpoint.includes(".rds.amazonaws.com")) {
     errors.push({ code: "RDS_ENDPOINT_INVALID", field: "rdsEndpoint", message: "RDS endpoint should be an Amazon RDS endpoint." });
   }
 
@@ -122,9 +133,9 @@ export function validateCollectorExcelInput(input: CollectorExcelInput, options:
     errors.push({ code: "PASSWORD_REQUIRED", field: "password", message: "Password is required for the collector connection and must not be stored in reports." });
   }
 
-  if (!instanceClass) {
+  if (!instanceClass && options.requireExistingInstanceClass !== false) {
     errors.push({ code: "EXISTING_INSTANCE_REQUIRED", field: "existingInstanceClass", message: "Existing RDS instance class is required in the collector spreadsheet." });
-  } else if (!isRdsInstanceClass(instanceClass)) {
+  } else if (instanceClass && !isRdsInstanceClass(instanceClass)) {
     errors.push({ code: "EXISTING_INSTANCE_INVALID", field: "existingInstanceClass", message: "Existing instance must look like an RDS DB class, for example db.r8i.4xlarge." });
   }
 

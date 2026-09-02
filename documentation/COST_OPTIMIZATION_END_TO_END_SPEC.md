@@ -55,6 +55,8 @@ The upload analyzer accepts collector evidence only. It does not require side-lo
 
 The collector must be SQL Server-only, bounded, and low impact. Its workload evidence comes from read-only DMV, catalog, and performance-counter queries. To preserve the approved SSAT collector flow, it may create collector-owned staging tables and a SQL Agent sampling job, and must remove those artifacts after export. It must not modify customer application tables or data. When Cost Optimization is disabled, original collector behavior remains unchanged.
 
+Kentra V2 Cost Optimization mode uses a compact collector-owned staging layout. It keeps `SQL_CPUCollection` for SQL process CPU, system idle, and Other CPU evidence, and stores memory, cumulative per-file I/O, and tempdb evidence in the consolidated `dbo.CO_WorkloadSamples` table. In this mode the legacy SSAT memory and database-I/O staging tables (`SQL_MemCollection`, `SQL_DBIOTotal`, and `SQL_DBIO`) are not created, populated, or exported. This avoids collecting overlapping memory/I/O evidence while preserving the original collector behavior when Cost Optimization is off.
+
 Cost Optimization mode preserves synchronized timestamped evidence for:
 
 - SQL process CPU, system idle, and Other CPU.

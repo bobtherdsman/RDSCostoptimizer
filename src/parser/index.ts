@@ -26,7 +26,7 @@ export interface ExistingCollectorCsvSet {
   workloadSamplesCsv?: string;
   memorySamplesCsv?: string;
   memoryDiagnosticsCsv?: string;
-  ioCsv: string;
+  ioCsv?: string;
   storageCsv?: string;
   dbCpuRequestCsv?: string;
   waitStatsCsv?: string;
@@ -52,26 +52,26 @@ export function normalizeExistingCollectorCsvs(csvs: ExistingCollectorCsvSet): W
   const consolidatedMemoryRows = workloadSampleRows.filter(isMemoryWorkloadSampleRow);
   const consolidatedFileIoRows = workloadSampleRows.filter(isFileIoWorkloadSampleRow);
   const consolidatedTempdbRows = workloadSampleRows.filter(isTempdbWorkloadSampleRow);
-  const costOptimizationMemoryRows = [
-    ...(csvs.memorySamplesCsv ? parseCsv(csvs.memorySamplesCsv) : []),
-    ...consolidatedMemoryRows
-  ];
-  const ioRows = parseCsv(csvs.ioCsv);
+  const splitMemoryRows = csvs.memorySamplesCsv ? parseCsv(csvs.memorySamplesCsv) : [];
+  const costOptimizationMemoryRows = consolidatedMemoryRows.length > 0
+    ? consolidatedMemoryRows
+    : splitMemoryRows;
+  const ioRows = csvs.ioCsv ? parseCsv(csvs.ioCsv) : [];
   const storageRows = csvs.storageCsv ? parseCsv(csvs.storageCsv) : [];
   const dbCpuRows = csvs.dbCpuRequestCsv ? parseCsv(csvs.dbCpuRequestCsv) : [];
   const memoryDiagnosticsRows = csvs.memoryDiagnosticsCsv ? parseCsv(csvs.memoryDiagnosticsCsv) : [];
   const memoryRows = mergeMemoryRows(legacyMemoryRows, costOptimizationMemoryRows, memoryDiagnosticsRows);
   const waitRows = csvs.waitStatsCsv ? parseCsv(csvs.waitStatsCsv) : [];
   const fileIoRows = csvs.fileIoCsv ? parseCsv(csvs.fileIoCsv) : [];
-  const fileIoSampleRows = [
-    ...(csvs.fileIoSamplesCsv ? parseCsv(csvs.fileIoSamplesCsv) : []),
-    ...consolidatedFileIoRows
-  ];
+  const splitFileIoSampleRows = csvs.fileIoSamplesCsv ? parseCsv(csvs.fileIoSamplesCsv) : [];
+  const fileIoSampleRows = consolidatedFileIoRows.length > 0
+    ? consolidatedFileIoRows
+    : splitFileIoSampleRows;
   const tempdbUsageRows = csvs.tempdbUsageCsv ? parseCsv(csvs.tempdbUsageCsv) : [];
-  const tempdbSampleRows = [
-    ...(csvs.tempdbSamplesCsv ? parseCsv(csvs.tempdbSamplesCsv) : []),
-    ...consolidatedTempdbRows
-  ];
+  const splitTempdbSampleRows = csvs.tempdbSamplesCsv ? parseCsv(csvs.tempdbSamplesCsv) : [];
+  const tempdbSampleRows = consolidatedTempdbRows.length > 0
+    ? consolidatedTempdbRows
+    : splitTempdbSampleRows;
   const editionCompatibilityRows = csvs.editionCompatibilityCsv
     ? parseCsv(csvs.editionCompatibilityCsv)
     : [];
@@ -175,9 +175,15 @@ function mergeMemoryRows(
 function memoryRowKey(row: CsvRow, fallback: string): string {
   const timestamp = row.CollectionTime ?? row.collectionTime ?? row.SQL_CollectionTime;
   if (!timestamp) return fallback;
-  const timestampMs = Date.parse(timestamp.replace(" ", "T"));
+  const timestampMs = parseCollectorTimestampMs(timestamp);
   if (!Number.isFinite(timestampMs)) return `${timestamp}|${fallback}`;
   return new Date(Math.floor(timestampMs / 60_000) * 60_000).toISOString();
+}
+
+function parseCollectorTimestampMs(timestamp: string): number {
+  const direct = Date.parse(timestamp);
+  if (Number.isFinite(direct)) return direct;
+  return Date.parse(timestamp.replace(" ", "T"));
 }
 
 function applyDiagnosticCounter(target: CsvRow, row: CsvRow): void {
@@ -233,16 +239,44 @@ export function normalizeCollectorOutput(): WorkloadProfile {
 function toIoSample(row: CsvRow): IoSample {
   const bRead = numberFrom(row.BRead ?? row.bread);
   const bWritten = numberFrom(row.BWritten ?? row.bwritten);
-  const explicitThroughput = numberFrom(row.Throuput ?? row.Throughput ?? row.throughput);
+  const explicitThroughput = numberFrom(
+    row.Throuput
+      ?? row.Throughput
+      ?? row.throughput
+      ?? row.ThroughputMbps
+      ?? row.ThroughputMBps
+      ?? row.ThroughputMiBps
+      ?? row.throughputMbps
+      ?? row.throughputMBps
+      ?? row.throughputMiBps
+  );
   const throughputMbps = explicitThroughput > 0 ? explicitThroughput : (bRead + bWritten) / 60 / 1048576;
+  const explicitIops = numberFrom(
+    row.IOPS
+      ?? row.Iops
+      ?? row.iops
+      ?? row.TotalIopsPerSecond
+      ?? row.TotalIOPsPerSecond
+      ?? row.TotalIOPSPerSecond
+      ?? row.totalIopsPerSecond
+  );
+  const readWriteIops = numberFrom(row.ReadIOPS ?? row.ReadIops ?? row.readIops ?? row.read_iops)
+    + numberFrom(row.WriteIOPS ?? row.WriteIops ?? row.writeIops ?? row.write_iops);
   const rawIops = numberFrom(row.TotalIOPs ?? row.TotalIOPS ?? row.totaliops);
   const databaseName = row.DBName || row.DatabaseName || row.databaseName || "unknown";
   const isServerLevelSample = databaseName === "unknown";
+  const iops = explicitIops > 0
+    ? explicitIops
+    : readWriteIops > 0
+      ? readWriteIops
+      : isServerLevelSample
+        ? rawIops
+        : rawIops / 60;
 
   return {
     databaseName,
     sampleId: row.Sample_ID || row.SampleId || row.sampleId || row.CollectionTime || row.collectionTime || "single",
-    iops: isServerLevelSample ? rawIops : rawIops / 60,
+    iops,
     throughputMbps
   };
 }
@@ -507,7 +541,7 @@ function latestFileIoRows(rows: CsvRow[]): CsvRow[] {
   const latest = new Map<string, { timestampMs: number; row: CsvRow }>();
   for (const row of rows) {
     const timestamp = row.CollectionTime ?? row.collectionTime;
-    const timestampMs = timestamp ? Date.parse(timestamp.replace(" ", "T")) : Number.NaN;
+    const timestampMs = timestamp ? parseCollectorTimestampMs(timestamp) : Number.NaN;
     if (!Number.isFinite(timestampMs)) continue;
     const key = [
       row.database_id ?? row.Database_ID ?? row.DatabaseId ?? row.DBName ?? row.DatabaseName ?? row.databaseName ?? "unknown",

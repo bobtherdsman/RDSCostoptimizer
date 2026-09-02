@@ -27,6 +27,17 @@ export interface DatabaseDriverSummary {
   notes: string[];
 }
 
+export type AssessmentArtifactFormat = "html" | "json" | "csv" | "pdf";
+
+export interface AssessmentArtifactSummary {
+  artifactId: string;
+  label: string;
+  format: AssessmentArtifactFormat;
+  scope: "server" | "fleet";
+  includedSections: string[];
+  notes: string[];
+}
+
 export interface WorkloadOptimizationReport {
   serverName?: string;
   status: WorkloadReportStatus;
@@ -46,9 +57,11 @@ export interface WorkloadOptimizationReport {
   candidateEvaluations: OptimizationResult["candidateEvaluations"];
   whyOptimized: string[];
   topDatabaseDrivers: DatabaseDriverSummary[];
+  supportingEvidence: string[];
   advisorySignals: string[];
   actionPlan: string[];
   harnessFindings: HarnessFinding[];
+  assessmentArtifacts: AssessmentArtifactSummary[];
   pricingDeferred: true;
   pricingNote: string;
 }
@@ -123,6 +136,8 @@ export function buildWorkloadOptimizationReport(input: WorkloadReportInput): Wor
       ? "aggressive_optimization"
       : "not_recommended";
   const topDatabaseDrivers = summarizeDatabaseDrivers(input.result.topOffendingDatabases);
+  const limitingResources = input.result.limitingResources.map(toCustomerVisibleLimitingResource);
+  const supportingEvidence = advisorySignals(input.result.topOffendingDatabases, input.result.currentConfig, input.result.evidence);
 
   return {
     serverName: input.serverName,
@@ -139,20 +154,24 @@ export function buildWorkloadOptimizationReport(input: WorkloadReportInput): Wor
     evidence: input.result.evidence,
     resultEvidence: input.result.optimizationEvidence,
     enterpriseToStandard: input.result.enterpriseToStandard,
-    limitingResources: input.result.limitingResources,
+    limitingResources,
     candidateEvaluations: input.result.candidateEvaluations,
-    whyOptimized: status !== "not_recommended" ? whyOptimized(input.result, topDatabaseDrivers) : [],
+    whyOptimized: status !== "not_recommended" ? whyOptimized({ ...input.result, limitingResources }, topDatabaseDrivers) : [],
     topDatabaseDrivers,
-    advisorySignals: advisorySignals(input.result.topOffendingDatabases, input.result.currentConfig, input.result.evidence),
+    supportingEvidence,
+    advisorySignals: supportingEvidence,
     actionPlan: actionPlan(
       status,
+      input.result.currentConfig,
       blockers,
+      limitingResources,
       topDatabaseDrivers,
       input.result.enterpriseToStandard
     ),
     harnessFindings: input.harnessFindings ?? [],
+    assessmentArtifacts: assessmentArtifacts(input.serverName, input.result, input.harnessFindings ?? [], topDatabaseDrivers),
     pricingDeferred: true,
-    pricingNote: "Pricing is deferred for the workload-optimization MVP; this report verifies workload fit and blockers only."
+    pricingNote: "Pricing is deferred for the workload-optimization MVP; this report verifies workload fit and evidence checks only."
   };
 }
 
@@ -288,7 +307,7 @@ export function toCsvReport(reports: WorkloadOptimizationReport | readonly Workl
     "blockers",
     "passedChecks",
     "failedHarnessChecks",
-    "advisorySignals",
+    "supportingEvidence",
     "actionPlan",
     "pricingDeferred"
   ];
@@ -387,7 +406,7 @@ export function toCsvReport(reports: WorkloadOptimizationReport | readonly Workl
     report.blockers.map((blocker) => `${blocker.dimension}:${blocker.code}:${blocker.message}`).join("; "),
     report.passedChecks.join("; "),
     report.harnessFindings.filter((finding) => !finding.passed).map((finding) => `${finding.oracle}:${finding.message}`).join("; "),
-    report.advisorySignals.join("; "),
+    report.supportingEvidence.join("; "),
     report.actionPlan.join("; "),
     String(report.pricingDeferred)
   ]);
@@ -396,7 +415,7 @@ export function toCsvReport(reports: WorkloadOptimizationReport | readonly Workl
 }
 
 function summarizeDatabaseDrivers(databases: DatabaseAttribution[]): DatabaseDriverSummary[] {
-  return databases.map((database) => {
+  return databases.filter(isCustomerVisibleDatabase).map((database) => {
     const drivers: string[] = [];
     const notes: string[] = [];
 
@@ -422,13 +441,76 @@ function summarizeDatabaseDrivers(databases: DatabaseAttribution[]): DatabaseDri
   });
 }
 
+function assessmentArtifacts(
+  serverName: string | undefined,
+  result: OptimizationResult,
+  harnessFindings: readonly HarnessFinding[],
+  topDatabaseDrivers: readonly DatabaseDriverSummary[]
+): AssessmentArtifactSummary[] {
+  const serverId = (serverName ?? "server").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "server";
+  const commonSections = [
+    "current and selected configuration",
+    "visible vCPU comparison",
+    "evidence window and confidence",
+    "all limiting resource gates",
+    "candidate evaluation history",
+    "passed checks and stay-as-is reasons"
+  ];
+  const evidenceSections = [
+    result.optimizationEvidence ? "candidate evidence" : undefined,
+    result.enterpriseToStandard ? "Enterprise-to-Standard assessment" : undefined,
+    topDatabaseDrivers.length > 0 ? "defensible top database drivers" : undefined,
+    harnessFindings.length > 0 ? "independent harness findings" : undefined
+  ].filter((section): section is string => Boolean(section));
+
+  return [
+    {
+      artifactId: `${serverId}-results-html`,
+      label: "Assessment results page",
+      format: "html",
+      scope: "server",
+      includedSections: [...commonSections, ...evidenceSections, "next action plan"],
+      notes: ["Rendered for review immediately after upload analysis."]
+    },
+    {
+      artifactId: `${serverId}-evidence-json`,
+      label: "Structured JSON evidence package",
+      format: "json",
+      scope: "fleet",
+      includedSections: [...commonSections, ...evidenceSections, "fleet summary"],
+      notes: ["Available from the JSON export link; credentials are not included."]
+    },
+    {
+      artifactId: `${serverId}-decision-csv`,
+      label: "CSV decision matrix",
+      format: "csv",
+      scope: "fleet",
+      includedSections: [
+        "fleet counts",
+        "per-server decision row",
+        "CPU, memory, IOPS, throughput, tempdb, edition, orderability, and evidence fields",
+        "candidate and blocker summaries"
+      ],
+      notes: ["Available from the CSV export link for spreadsheet review."]
+    },
+    {
+      artifactId: `${serverId}-executive-pdf`,
+      label: "PDF-style executive summary",
+      format: "pdf",
+      scope: "fleet",
+      includedSections: ["fleet summary", "per-server outcome", "outcome rationale", "next action"],
+      notes: ["Available from the PDF export link; pricing remains deferred."]
+    }
+  ];
+}
+
 function whyOptimized(result: OptimizationResult, topDatabaseDrivers: DatabaseDriverSummary[]): string[] {
   const evidence = result.optimizationEvidence;
   const recommended = result.recommendedConfig;
   if (!evidence || !recommended) return [];
 
   const items = [
-    `Decision: ${result.decision}.`,
+    `Outcome: Scaled down to ${recommended.instanceClass}.`,
     `Compute changes from ${result.currentConfig.instanceClass} (${evidence.currentVcpu} vCPU) to ${recommended.instanceClass} (${evidence.optimizedVcpu ?? "unknown"} vCPU).`,
     result.cpuState ? `Current CPU state is ${formatCpuState(result.cpuState)}.` : undefined,
     `Observed SQL CPU P95 is ${round(evidence.cpuP95Pct)}%; projected SQL CPU P95 is ${formatOptionalPercent(evidence.projectedSqlCpuP95Pct)} and P99 is ${formatOptionalPercent(evidence.projectedSqlCpuP99Pct)}.`,
@@ -481,12 +563,12 @@ function whyOptimized(result: OptimizationResult, topDatabaseDrivers: DatabaseDr
       ? `Candidate local tempdb capacity result is ${evidence.tempdbCapacityResult}; representative/peak allocation is ${evidence.tempdbRepresentativeAllocatedGb ?? "unavailable"}/${evidence.tempdbPeakAllocatedGb ?? "unavailable"} GB against ${evidence.candidateLocalStorageCapacityGb ?? "not applicable"} GB.`
       : undefined,
     evidence.tempdbLocalIoRiskSignal
-      ? "The candidate relies on local NVMe for observed tempdb I/O. Capacity passed, while I/O intensity remains a confidence/risk signal because no authoritative class-specific performance limit is available."
+      ? "The candidate relies on local NVMe for observed tempdb I/O. Capacity passed, while I/O intensity remains a confidence signal because no authoritative class-specific performance limit is available."
       : undefined,
     result.enterpriseToStandard?.eligible
       ? `Enterprise-to-Standard eligibility passed. Standard Edition is a migration recommendation using ${formatMigrationPath(result.enterpriseToStandard.acceptedMigrationPath)}, not an in-place RDS resize.`
       : result.enterpriseToStandard?.status === "blocked"
-        ? `The compute recommendation remains on Enterprise Edition. Standard Edition is blocked by ${unique(result.enterpriseToStandard.blockers.map((blocker) => blocker.category)).join(", ")} evidence.`
+        ? `The compute recommendation remains on Enterprise Edition. Standard Edition is not ready because of ${unique(result.enterpriseToStandard.blockers.map((blocker) => blocker.category)).join(", ")} evidence.`
         : undefined,
     topDatabaseDrivers[0] ? `Top database driver is ${topDatabaseDrivers[0].databaseName}.` : undefined,
     result.limitingResources.length > 0
@@ -500,8 +582,9 @@ function whyOptimized(result: OptimizationResult, topDatabaseDrivers: DatabaseDr
 
 function advisorySignals(databases: DatabaseAttribution[], currentConfig: CurrentRdsConfig, evidence: WorkloadEvidence | undefined): string[] {
   const signals: string[] = [];
-  const largestIops = maxDatabaseShare(databases, "iops");
-  const largestThroughput = maxDatabaseShare(databases, "throughput");
+  const customerDatabases = databases.filter(isCustomerVisibleDatabase);
+  const largestIops = maxDatabaseShare(customerDatabases, "iops");
+  const largestThroughput = maxDatabaseShare(customerDatabases, "throughput");
 
   if (largestIops && largestIops.sharePct >= 50) {
     signals.push(`${largestIops.databaseName} drives ${round(largestIops.sharePct)}% of database-attributed IOPS; review isolate or split options.`);
@@ -509,10 +592,10 @@ function advisorySignals(databases: DatabaseAttribution[], currentConfig: Curren
   if (largestThroughput && largestThroughput.sharePct >= 50) {
     signals.push(`${largestThroughput.databaseName} drives ${round(largestThroughput.sharePct)}% of database-attributed throughput; review isolate or split options.`);
   }
-  if (databases.length >= 5 && !largestIops && !largestThroughput) {
+  if (customerDatabases.length >= 5 && !largestIops && !largestThroughput) {
     signals.push("Multiple databases are present without a single dominant I/O driver; review merge or consolidation options only after workload ownership is confirmed.");
   }
-  if (databases.some((database) => (database.tempdbSharePct ?? 0) >= 50)) {
+  if (customerDatabases.some((database) => (database.tempdbSharePct ?? 0) >= 50)) {
     signals.push("tempdb is a major workload driver; investigate tempdb-heavy operations before changing storage or instance class.");
   }
   if (currentConfig.regionSource === "fallback") {
@@ -530,9 +613,7 @@ function advisorySignals(databases: DatabaseAttribution[], currentConfig: Curren
   if (evidence?.memory?.requiredMemoryFloorGb !== undefined) {
     signals.push(`Less-elastic memory floor is ${evidence.memory.requiredMemoryFloorGb} GB including ${evidence.memory.headroomPct ?? 20}% headroom; committed memory was not used as a standalone RAM requirement.`);
   }
-  for (const latency of evidence?.fileLatency ?? []) {
-    signals.push(`${latency.databaseName}${latency.fileType ? " " + latency.fileType : ""} latency evidence: ${latency.advisory.join(" ")}`);
-  }
+  signals.push(...fileLatencySignals(evidence?.fileLatency ?? []));
   if ((evidence?.tempdbIoSharePct ?? 0) >= 40) {
     signals.push(`tempdb drives ${evidence?.tempdbIoSharePct}% of database-attributed I/O; review tempdb usage before storage or instance changes.`);
   }
@@ -549,32 +630,37 @@ function advisorySignals(databases: DatabaseAttribution[], currentConfig: Curren
 
 function actionPlan(
   status: WorkloadReportStatus,
+  currentConfig: CurrentRdsConfig,
   blockers: OptimizationBlocker[],
+  limitingResources: LimitingResourceAssessment[],
   topDatabaseDrivers: DatabaseDriverSummary[],
   enterpriseToStandard: EnterpriseToStandardEvaluation | undefined
 ): string[] {
   const actions: string[] = [];
 
-  if (status !== "not_recommended") {
+  if (status === "not_recommended") {
+    actions.push(noOptimizationRecommendation(currentConfig, blockers, limitingResources));
+    actions.push(...noOptimizationFollowUps(blockers, limitingResources));
+  } else {
     actions.push("Review the recommended target as workload-fit only; pricing is deferred.");
     actions.push("Validate the change in a maintenance window with normal RDS snapshot and rollback planning.");
     if (status === "aggressive_optimization") {
       actions.push("Treat this as an aggressive, medium-confidence option and validate memory behavior under representative load before production adoption.");
     }
-  }
 
-  for (const dimension of unique(blockers.map((blocker) => blocker.dimension))) {
-    if (dimension === "memory") actions.push("Memory blocks the downsize; review PLE, SQL max memory, grants, waits, and database size before reducing vCPU/memory.");
-    if (dimension === "iops") actions.push("IOPS blocks the downsize; review top database I/O, tempdb share, file latency, and choose a class with sufficient sustained and burst instance capability.");
-    if (dimension === "throughput") actions.push("Throughput blocks the downsize; review reporting, backup, and large-block workload windows and choose a class with sufficient sustained and burst instance capability.");
-    if (dimension === "tempdb") actions.push("tempdb local-capacity fit blocks the candidate; use a class with enough local instance storage or keep tempdb on the normal storage path.");
-    if (dimension === "cpu") actions.push("CPU target does not fit the proposed candidate; keep the current/larger candidate order or collect a longer window.");
-    if (dimension === "edition") actions.push("Edition constraints block the recommendation; run the edition feature eligibility check before any edition change.");
-    if (dimension === "orderability") actions.push("Orderability blocks the recommendation; verify SQL version, edition, region, and instance class availability.");
-  }
+    for (const dimension of unique(blockers.map((blocker) => blocker.dimension))) {
+      if (dimension === "memory") actions.push("Memory does not fit the downsize yet; review PLE, SQL max memory, grants, waits, and database size before reducing vCPU/memory.");
+      if (dimension === "iops") actions.push("IOPS does not fit the downsize yet; review top database I/O, tempdb share, file latency, and choose a class with sufficient sustained and burst instance capability.");
+      if (dimension === "throughput") actions.push("Throughput does not fit the downsize yet; review reporting, backup, and large-block workload windows and choose a class with sufficient sustained and burst instance capability.");
+      if (dimension === "tempdb") actions.push("tempdb local-capacity fit is not ready for the candidate; use a class with enough local instance storage or keep tempdb on the normal storage path.");
+      if (dimension === "cpu") actions.push("CPU fit does not support the lower candidate yet; reassess only after a representative evidence window or a candidate with sufficient SQL-visible vCPU is available.");
+      if (dimension === "edition") actions.push("Edition constraints must be resolved before the recommendation; run the edition feature eligibility check before any edition change.");
+      if (dimension === "orderability") actions.push("Orderability evidence must be resolved before the recommendation; verify SQL version, edition, region, and instance class availability.");
+    }
 
-  if (topDatabaseDrivers.length > 0) {
-    actions.push(`Review top database driver: ${topDatabaseDrivers[0].databaseName}.`);
+    if (topDatabaseDrivers.length > 0) {
+      actions.push(`Review top database driver: ${topDatabaseDrivers[0].databaseName}.`);
+    }
   }
   if (enterpriseToStandard?.eligible) {
     actions.push(`Plan Enterprise-to-Standard as a separate ${formatMigrationPath(enterpriseToStandard.acceptedMigrationPath)} migration with application validation and rollback planning.`);
@@ -583,6 +669,144 @@ function actionPlan(
   }
 
   return unique(actions);
+}
+
+function noOptimizationRecommendation(
+  currentConfig: CurrentRdsConfig,
+  blockers: readonly OptimizationBlocker[],
+  limitingResources: readonly LimitingResourceAssessment[]
+): string {
+  const reasons = noOptimizationReasons(blockers, limitingResources);
+  const resolution = noOptimizationResolution(blockers, limitingResources);
+  return `Stay as is on the current instance (${currentConfig.instanceClass}) because ${formatSentenceList(reasons)}. Reassess only after ${resolution}.`;
+}
+
+function noOptimizationReasons(
+  blockers: readonly OptimizationBlocker[],
+  limitingResources: readonly LimitingResourceAssessment[]
+): string[] {
+  const blockerReasons = blockers.map((blocker) => `${blockerReasonLabel(blocker)}: ${blocker.message}`);
+  const resourceReasons = limitingResources
+    .filter((resource) => resource.status === "blocking")
+    .map((resource) => `${resourceReasonLabel(resource)}: ${resource.reason}`);
+  return unique([...blockerReasons, ...resourceReasons]).slice(0, 5);
+}
+
+function blockerReasonLabel(blocker: OptimizationBlocker): string {
+  if (isEvidenceWindowIssue(blocker.code, blocker.message)) return "insufficient evidence window";
+  if (blocker.dimension === "cpu") return "CPU fit failure";
+  if (blocker.dimension === "memory") return "memory fit or pressure failure";
+  if (blocker.dimension === "iops") return "IOPS fit failure";
+  if (blocker.dimension === "throughput") return "throughput fit failure";
+  if (blocker.dimension === "tempdb") return "tempdb capacity or placement failure";
+  if (blocker.dimension === "edition") return "SQL Server edition constraint";
+  return "orderability or current-configuration issue";
+}
+
+function resourceReasonLabel(resource: LimitingResourceAssessment): string {
+  if (isEvidenceWindowIssue(resource.dimension, resource.reason)) return "insufficient evidence window";
+  if (resource.dimension === "cpu") return "CPU fit failure";
+  if (resource.dimension === "memory") return "memory fit or pressure failure";
+  if (resource.dimension === "iops") return "IOPS fit failure";
+  if (resource.dimension === "throughput") return "throughput fit failure";
+  if (resource.dimension === "tempdb") return "tempdb capacity or placement failure";
+  if (resource.dimension === "edition") return "SQL Server edition constraint";
+  if (resource.dimension === "evidence") return "missing or insufficient evidence";
+  return "orderability or current-configuration issue";
+}
+
+function noOptimizationResolution(
+  blockers: readonly OptimizationBlocker[],
+  limitingResources: readonly LimitingResourceAssessment[]
+): string {
+  const items = noOptimizationResolutionItems(blockers, limitingResources);
+  if (items.length === 0) {
+    return "new representative evidence and an orderable candidate prove that every CPU, memory, IOPS, throughput, tempdb, edition, and orderability gate passes";
+  }
+  return `${formatSentenceList(items)} ${items.length === 1 ? "is" : "are"} resolved`;
+}
+
+function noOptimizationResolutionItems(
+  blockers: readonly OptimizationBlocker[],
+  limitingResources: readonly LimitingResourceAssessment[]
+): string[] {
+  const codeAndReason = [
+    ...blockers.map((blocker) => ({ code: blocker.code, reason: blocker.message, dimension: blocker.dimension })),
+    ...limitingResources
+      .filter((resource) => resource.status === "blocking")
+      .map((resource) => ({ code: resource.dimension, reason: resource.reason, dimension: resource.dimension }))
+  ];
+  const dimensions = new Set(codeAndReason.map((item) => item.dimension));
+  const values: string[] = [];
+
+  if (codeAndReason.some((item) => isEvidenceWindowIssue(item.code, item.reason))) {
+    values.push("a representative collection window of at least 7 days, preferably 14 days, with customer confirmation of normal peak workload");
+  }
+  if (dimensions.has("cpu")) {
+    values.push("a lower candidate with enough SQL-visible vCPU for the projected SQL and total CPU gates");
+  }
+  if (dimensions.has("memory")) {
+    values.push("memory pressure, working-set, and memory-to-I/O evidence showing the lower-memory candidate is safe");
+  }
+  if (dimensions.has("iops")) {
+    values.push("a candidate whose sustained and burst instance IOPS capability fits the observed physical I/O demand");
+  }
+  if (dimensions.has("throughput")) {
+    values.push("a candidate whose sustained and burst throughput capability fits the observed byte-rate demand");
+  }
+  if (dimensions.has("tempdb")) {
+    values.push("a tempdb placement with enough local capacity or a normal-storage path that fits the remapped demand");
+  }
+  if (dimensions.has("edition")) {
+    values.push("all Enterprise-to-Standard feature, scale, vendor, orderability, and migration issues");
+  }
+  if (dimensions.has("orderability")) {
+    values.push("the missing or unsupported endpoint, Region, SQL Server version, edition, current RDSSize, or orderability evidence");
+  }
+
+  return unique(values);
+}
+
+function noOptimizationFollowUps(
+  blockers: readonly OptimizationBlocker[],
+  limitingResources: readonly LimitingResourceAssessment[]
+): string[] {
+  const dimensions = unique([
+    ...blockers.map((blocker) => blocker.dimension),
+    ...limitingResources.filter((resource) => resource.status === "blocking").map((resource) => resource.dimension)
+  ]);
+  const actions: string[] = [];
+
+  if (blockers.some((blocker) => isEvidenceWindowIssue(blocker.code, blocker.message))
+    || limitingResources.some((resource) => resource.status === "blocking" && isEvidenceWindowIssue(resource.dimension, resource.reason))) {
+    actions.push("Before reassessment, collect a longer representative workload window and confirm it includes normal peak business periods.");
+  }
+  if (dimensions.includes("cpu")) actions.push("CPU fit blocks optimization; reassess only with a candidate whose SQL-visible vCPU passes projected SQL CPU P95, SQL CPU P99, and concurrent total CPU P99 gates.");
+  if (dimensions.includes("memory")) actions.push("Memory blocks optimization; keep the current memory footprint until pressure, working-set, and memory-to-I/O evidence support a lower-memory candidate.");
+  if (dimensions.includes("iops")) actions.push("IOPS blocks optimization; use a candidate with sufficient sustained and burst instance IOPS capability for the observed physical I/O demand.");
+  if (dimensions.includes("throughput")) actions.push("Throughput blocks optimization; use a candidate with sufficient sustained and burst throughput capability for the observed workload windows.");
+  if (dimensions.includes("tempdb")) actions.push("tempdb blocks optimization; choose a class with enough local instance storage or keep tempdb on the normal storage path.");
+  if (dimensions.includes("edition")) actions.push("Edition constraints block optimization; complete the Enterprise-to-Standard eligibility checks before considering an edition migration.");
+  if (dimensions.includes("orderability")) actions.push("Orderability or configuration blocks optimization; provide the endpoint, Region, current RDSSize, SQL Server edition/version, and a currently orderable class before reassessment.");
+
+  return actions;
+}
+
+function isEvidenceWindowIssue(code: string, message: string): boolean {
+  const text = `${code} ${message}`.toLowerCase();
+  return text.includes("evidence window")
+    || text.includes("collection window")
+    || text.includes("collected hour")
+    || text.includes("collected hours")
+    || text.includes("collection duration")
+    || text.includes("window too short");
+}
+
+function formatSentenceList(values: readonly string[]): string {
+  if (values.length === 0) return "no lower candidate proving every required workload gate";
+  if (values.length === 1) return values[0];
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
 }
 
 function maxDatabaseShare(
@@ -600,6 +824,85 @@ function maxDatabaseShare(
   return { databaseName: largest.databaseName, sharePct: largest.value };
 }
 
+function isCustomerVisibleDatabase(database: DatabaseAttribution): boolean {
+  return isCustomerVisibleDatabaseName(database.databaseName);
+}
+
+function isCustomerVisibleDatabaseName(databaseName: string): boolean {
+  return databaseName.trim().toLowerCase() !== "rdsadmin";
+}
+
+function fileLatencySignals(latencies: readonly WorkloadEvidence["fileLatency"][number][]): string[] {
+  const customerLatencies = latencies.filter((latency) => isCustomerVisibleDatabaseName(latency.databaseName));
+  const tempdbLatencies = customerLatencies.filter((latency) => isTempdbDatabaseName(latency.databaseName));
+  const signals = groupedFileLatencySignals(customerLatencies.filter((latency) => !isTempdbDatabaseName(latency.databaseName)));
+
+  if (tempdbLatencies.length > 0) {
+    const fileTypes = unique(tempdbLatencies.map((latency) => latency.fileType).filter((value): value is string => Boolean(value)));
+    const metrics = latencyMetricSummary(tempdbLatencies);
+    const advisory = unique(tempdbLatencies.flatMap((latency) => latency.advisory)).join(" ");
+    signals.push([
+      `tempdb latency evidence summarized from ${tempdbLatencies.length} row(s)`,
+      fileTypes.length > 0 ? `file types: ${fileTypes.join(", ")}` : undefined,
+      metrics || undefined,
+      advisory || undefined
+    ].filter((value): value is string => Boolean(value)).join("; ") + ".");
+  }
+
+  return signals;
+}
+
+function groupedFileLatencySignals(latencies: readonly WorkloadEvidence["fileLatency"][number][]): string[] {
+  const groups = new Map<string, WorkloadEvidence["fileLatency"]>();
+  for (const latency of latencies) {
+    const key = `${latency.databaseName}\u0000${latency.fileType ?? ""}`;
+    groups.set(key, [...(groups.get(key) ?? []), latency]);
+  }
+
+  return [...groups.values()].map((group) => {
+    const first = group[0]!;
+    const metrics = latencyMetricSummary(group);
+    const advisory = unique(group.flatMap((latency) => latency.advisory)).join(" ");
+    return [
+      `${first.databaseName}${first.fileType ? " " + first.fileType : ""} latency evidence`,
+      metrics || undefined,
+      advisory || undefined
+    ].filter((value): value is string => Boolean(value)).join(": ");
+  });
+}
+
+function latencyMetricSummary(latencies: readonly WorkloadEvidence["fileLatency"][number][]): string {
+  const maxRead = maxOptional(latencies.map((latency) => latency.readLatencyMs));
+  const maxWrite = maxOptional(latencies.map((latency) => latency.writeLatencyMs));
+  const maxTotal = maxOptional(latencies.map((latency) => latency.totalLatencyMs));
+  return [
+    maxRead === undefined ? undefined : `max read ${maxRead} ms`,
+    maxWrite === undefined ? undefined : `max write ${maxWrite} ms`,
+    maxTotal === undefined ? undefined : `max total ${maxTotal} ms`
+  ].filter((value): value is string => Boolean(value)).join(", ");
+}
+
+function maxOptional(values: readonly (number | undefined)[]): number | undefined {
+  const numeric = values.filter((value): value is number => value !== undefined);
+  return numeric.length === 0 ? undefined : Math.max(...numeric);
+}
+
+function isTempdbDatabaseName(databaseName: string): boolean {
+  return databaseName.trim().toLowerCase() === "tempdb";
+}
+
+function toCustomerVisibleLimitingResource(resource: LimitingResourceAssessment): LimitingResourceAssessment {
+  if (!resource.topDatabaseName || isCustomerVisibleDatabaseName(resource.topDatabaseName)) {
+    return resource;
+  }
+  return {
+    ...resource,
+    topDatabaseName: undefined,
+    topDatabaseMetric: undefined,
+    topDatabaseValue: undefined
+  };
+}
+
 function toServerComparison(report: WorkloadOptimizationReport): WorkloadServerComparison {
   return {
     serverName: report.serverName ?? "unknown",
@@ -612,7 +915,7 @@ function toServerComparison(report: WorkloadOptimizationReport): WorkloadServerC
     risk: report.risk,
     confidence: report.confidence,
     cpuState: report.cpuAssessment?.state,
-    whyNotOptimized: whyNotOptimized(report),
+    whyNotOptimized: whyNotOptimized(report).slice(0, 10),
     topDatabaseDriver: report.topDatabaseDrivers[0]?.databaseName
   };
 }
@@ -625,20 +928,27 @@ function whyNotOptimized(report: WorkloadOptimizationReport): string[] {
     .map((finding) => `harness ${finding.oracle}: ${finding.message}`);
   return unique([...reasons, ...failedHarness]);
 }
+
+function customerFacingOutcome(report: WorkloadOptimizationReport): string {
+  return report.status === "not_recommended"
+    ? `Stay as is on ${report.currentConfig.instanceClass}`
+    : `Scaled down to ${report.recommendedConfig?.instanceClass ?? "the optimized instance"}`;
+}
+
 function executiveSummaryLines(reports: readonly WorkloadOptimizationReport[]): string[] {
   const summary = buildWorkloadOptimizationSummary(reports);
   const lines = [
     "RDS SQL Server Workload Optimization Executive Summary",
-    "Pricing is deferred. This summary reports workload fit, blockers, risk, and next actions only.",
-    `Fleet summary: total=${summary.totalServers}, optimized=${summary.optimizedServers}, not optimized=${summary.notOptimizedServers}`,
+    "Pricing is deferred. This summary reports workload fit, evidence, and next actions only.",
+    `Fleet summary: total=${summary.totalServers}, scaled down=${summary.optimizedServers}, stay as is=${summary.notOptimizedServers}`,
     ""
   ];
 
   for (const report of reports) {
     lines.push(`Server: ${report.serverName ?? "unknown"}`);
-    lines.push(`Decision: ${report.decision} | Risk: ${report.risk}`);
+    lines.push(`Outcome: ${customerFacingOutcome(report)} | Confidence: ${report.confidence}`);
     if (report.cpuAssessment) {
-      lines.push(`CPU state: ${formatCpuState(report.cpuAssessment.state)} | current/candidate visible vCPU=${report.cpuAssessment.currentVisibleVcpu}/${report.cpuAssessment.candidateVisibleVcpu ?? "blocked"}`);
+      lines.push(`CPU signal: ${formatCpuState(report.cpuAssessment.state)} | current/candidate visible vCPU=${report.cpuAssessment.currentVisibleVcpu}/${report.cpuAssessment.candidateVisibleVcpu ?? report.cpuAssessment.currentVisibleVcpu}`);
       lines.push(`Projected SQL CPU P95/P99=${report.cpuAssessment.projectedSqlCpuP95Pct ?? "n/a"}%/${report.cpuAssessment.projectedSqlCpuP99Pct ?? "n/a"}% | total CPU P99=${report.cpuAssessment.projectedTotalCpuP99Pct ?? "n/a"}% | Other CPU P95/P99=${report.cpuAssessment.observedOtherCpuP95Pct ?? "n/a"}%/${report.cpuAssessment.observedOtherCpuP99Pct ?? "n/a"}%`);
     }
     if (report.evidenceWindow) {
@@ -646,7 +956,7 @@ function executiveSummaryLines(reports: readonly WorkloadOptimizationReport[]): 
       lines.push(`Evidence confidence: ${report.evidenceWindow.confidenceReason}`);
     }
     lines.push(`Current: ${report.currentConfig.instanceClass} | storage design retained: ${report.currentConfig.storageType}`);
-    lines.push(`Recommended: ${report.recommendedConfig?.instanceClass ?? "blocked"}`);
+    lines.push(report.recommendedConfig ? `Optimized instance: ${report.recommendedConfig.instanceClass}` : `Selected instance: ${report.currentConfig.instanceClass}`);
     if (report.enterpriseToStandard) {
       lines.push(`Enterprise to Standard: ${report.enterpriseToStandard.status} | migration path=${report.enterpriseToStandard.acceptedMigrationPath ?? "not accepted"}`);
     }
@@ -657,14 +967,14 @@ function executiveSummaryLines(reports: readonly WorkloadOptimizationReport[]): 
       lines.push(`Top DB: ${formatDatabaseDriver(report.topDatabaseDrivers[0])}`);
     }
     if (report.whyOptimized.length > 0) {
-      lines.push(`Why optimized: ${report.whyOptimized.join("; ")}`);
+      lines.push(`Why scaled down: ${report.whyOptimized.join("; ")}`);
     }
     const why = whyNotOptimized(report);
     if (why.length > 0) {
-      lines.push(`Why not optimized: ${why.join("; ")}`);
+      lines.push(`Why stay as is: ${why.join("; ")}`);
     }
-    if (report.advisorySignals.length > 0) {
-      lines.push(`Advisory: ${report.advisorySignals.join("; ")}`);
+    if (report.supportingEvidence.length > 0) {
+      lines.push(`Supporting evidence: ${report.supportingEvidence.join("; ")}`);
     }
     if (report.actionPlan.length > 0) {
       lines.push(`Next action: ${report.actionPlan[0]}`);

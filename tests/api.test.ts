@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { CurrentRdsConfig, MetricDistribution, WorkloadProfile } from "../src/contracts/types.js";
 import type { InstanceCatalogEntry } from "../src/catalog/index.js";
-import { analyzeWorkloadRequest, exportWorkloadReports, normalizeCollectorExcelInput, parseRdsRegionFromEndpoint, validateAnalyzeWorkloadRequest, validateCollectorExcelInput } from "../src/api/index.js";
+import { analyzeWorkloadRequest, exportWorkloadReports, normalizeCollectorExcelInput, normalizeCollectorRunManifestInput, parseRdsRegionFromEndpoint, validateAnalyzeWorkloadRequest, validateCollectorExcelInput } from "../src/api/index.js";
 import { productionWorkload } from "./production-workload.js";
 
 const catalog: InstanceCatalogEntry[] = [
@@ -112,6 +112,20 @@ describe("collector Excel input", () => {
     assert.ok(errors.some((error) => error.code === "LOGIN_REQUIRED"));
     assert.ok(errors.some((error) => error.code === "PASSWORD_REQUIRED"));
     assert.ok(errors.some((error) => error.code === "EXISTING_INSTANCE_INVALID"));
+  });
+
+  it("allows collector run manifests to use non-RDS server identifiers", () => {
+    const response = normalizeCollectorRunManifestInput({
+      rdsEndpoint: "GAP_96XL_IOPS",
+      login: "",
+      password: "",
+      existingInstanceClass: ""
+    });
+
+    assert.equal(response.ok, true, JSON.stringify(response));
+    if (!response.ok) return;
+    assert.equal(response.collectorInput.rdsEndpoint, "GAP_96XL_IOPS");
+    assert.equal(response.collectorInput.region, undefined);
   });
 
   it("parses region from standard RDS endpoints", () => {

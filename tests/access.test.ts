@@ -3,33 +3,28 @@ import { describe, it } from "node:test";
 import { validateOwnerAccess } from "../src/access/index.js";
 
 describe("validateOwnerAccess", () => {
-  it("allows the configured owner email case-insensitively", () => {
+  it("allows upload access before registration and login are implemented", () => {
     const result = validateOwnerAccess({
-      ownerEmail: "Owner@Example.com",
-      requesterEmail: " owner@example.com "
+      customerName: " Example Customer "
     });
 
     assert.equal(result.ok, true);
     if (!result.ok) return;
-    assert.equal(result.requesterEmail, "owner@example.com");
+    assert.equal(result.customerName, "Example Customer");
   });
 
-  it("denies access when owner email is missing", () => {
-    const result = validateOwnerAccess({ requesterEmail: "owner@example.com", ownerEmail: "" });
+  it("does not require COST_OWNER_EMAIL during the pre-registration upload flow", () => {
+    const result = validateOwnerAccess({ ownerEmail: "", requesterEmail: "" });
 
-    assert.equal(result.ok, false);
-    if (result.ok) return;
-    assert.ok(result.errors.some((error) => error.code === "COST_OWNER_EMAIL_REQUIRED"));
+    assert.equal(result.ok, true);
   });
 
-  it("denies access when requester is not the owner", () => {
+  it("does not use requester email until registration and login are implemented", () => {
     const result = validateOwnerAccess({
       ownerEmail: "owner@example.com",
       requesterEmail: "other@example.com"
     });
 
-    assert.equal(result.ok, false);
-    if (result.ok) return;
-    assert.ok(result.errors.some((error) => error.code === "OWNER_ACCESS_DENIED"));
+    assert.equal(result.ok, true);
   });
 });

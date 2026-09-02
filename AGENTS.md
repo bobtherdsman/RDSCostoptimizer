@@ -57,3 +57,9 @@ Before final response, the agent must report:
 - CPU downsize is the easiest win, but memory, IOPS, and throughput must fit before recommending a smaller instance.
 - DB-level metrics must be preserved so reports can show top offending databases and support split or merge discussions.
 - Every production behavior change must keep the independent harness aligned through tests or an explicit harness update authorized by the verified specification.
+
+## User-Facing Wording
+
+- Avoid the word `recommend` and its variants in user-facing summaries, explanations, and UI copy unless quoting existing code, enums, specifications, or file content.
+- Use `optimized` for workloads that can move to a better/lower target.
+- Use `as is` for workloads that should stay on the current setup.

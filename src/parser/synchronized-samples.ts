@@ -139,8 +139,10 @@ function parseMemorySamples(rows: CsvRow[], issues: WorkloadSampleIssue[]): Memo
       pageLifeExpectancySeconds: optionalNonNegativeNumber(
         row.OverallPleSeconds ?? row.PLE ?? row.ple
       ),
-      stolenServerMemoryMb: optionalNonNegativeNumber(row.StolenServerMem ?? row.stolenservermem),
-      memoryClerksJson: row.MemoryClerksData ?? row.memoryclerksdata,
+      stolenServerMemoryMb: optionalNonNegativeNumber(
+        row.StolenServerMemoryMb ?? row.StolenServerMem ?? row.stolenservermemorymb ?? row.stolenservermem
+      ),
+      memoryClerksJson: row.MemoryClerksData ?? row.memoryclerksdata ?? row.MemoryClerksJson ?? row.memoryclerksjson,
       memoryGrantsPending: optionalNonNegativeNumber(row.MemoryGrantsPending),
       memoryGrantsOutstanding: optionalNonNegativeNumber(row.MemoryGrantsOutstanding),
       grantedWorkspaceMemoryKb: optionalNonNegativeNumber(row.GrantedWorkspaceMemoryKb),
@@ -182,6 +184,8 @@ function parseMemorySamples(rows: CsvRow[], issues: WorkloadSampleIssue[]): Memo
       "OverallPleSeconds",
       "PLE",
       "ple",
+      "StolenServerMemoryMb",
+      "stolenservermemorymb",
       "StolenServerMem",
       "stolenservermem",
       "MemoryGrantsPending",
@@ -515,13 +519,19 @@ function detectDuplicateKeys<T extends { timestamp: string; sampleKey: string }>
 function parseTimestamp(value: string | undefined): { timestamp: string; timestampMs: number; sampleKey: string } | undefined {
   const timestamp = nonEmpty(value);
   if (!timestamp) return undefined;
-  const timestampMs = Date.parse(timestamp.replace(" ", "T"));
+  const timestampMs = parseCollectorTimestampMs(timestamp);
   if (!Number.isFinite(timestampMs)) return undefined;
   return {
     timestamp,
     timestampMs,
     sampleKey: sampleKey(timestampMs)
   };
+}
+
+function parseCollectorTimestampMs(timestamp: string): number {
+  const direct = Date.parse(timestamp);
+  if (Number.isFinite(direct)) return direct;
+  return Date.parse(timestamp.replace(" ", "T"));
 }
 
 function sampleKey(timestampMs: number): string {

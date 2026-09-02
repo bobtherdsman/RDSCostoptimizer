@@ -41,6 +41,8 @@ Uploads may contain one server or multiple servers. Matching manifest and filena
 - Current and candidate SQL Server/catalog facts.
 - Customer verbal confirmation of workload representativeness.
 
+Kentra V2 collector packages emit the workload-fit time series through `SQL_CPUCollection` plus the consolidated `CO_WORKLOAD_SAMPLES` export. When Cost Optimization mode is enabled, legacy SSAT memory and database-I/O exports are intentionally omitted because the same optimization evidence is captured in `CO_WORKLOAD_SAMPLES`.
+
 ## Required Decision Flow
 
 1. Resolve current SQL Server-visible CPU and class metadata.
@@ -90,7 +92,7 @@ Orderability and evidence quality are server-level gates and never receive inven
 ## Release Acceptance
 
 - Collector disabled mode preserves original behavior.
-- Collector enabled mode emits all approved evidence under the customer directory.
+- Collector enabled mode emits all approved evidence under the customer directory without collecting or exporting overlapping legacy SSAT memory/database-I/O evidence.
 - Credentials are absent from ZIP output.
 - One-server and multi-server uploads work.
 - CPU projection, memory, coupling, IOPS, throughput, tempdb, edition, and evidence-window branches are regression tested.

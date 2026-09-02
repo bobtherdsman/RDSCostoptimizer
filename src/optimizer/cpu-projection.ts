@@ -132,7 +132,14 @@ export function evaluateCpuCandidates(
       ? input.workload.evidence.memory.osTotalMemoryMb / 1024
       : undefined);
 
-  const evaluations = buildCpuCandidates(input).map((candidate) => {
+  const projectionCache = new Map<string, CpuProjection>();
+  const memoryCache = new Map<string, MemoryCandidateEvaluation>();
+  const memoryCouplingCache = new Map<string, MemoryCouplingEvaluation>();
+  const tempdbCache = new Map<string, CandidateTempdbEvaluation>();
+  const iopsCache = new Map<string, CandidateIopsEvaluation>();
+  const throughputCache = new Map<string, CandidateThroughputEvaluation>();
+  const evaluations: CpuCandidateEvaluation[] = [];
+  for (const candidate of buildCpuCandidates(input)) {
     const validation = isOrderableCandidate(
       input.catalog,
       input.currentConfig,
@@ -146,69 +153,79 @@ export function evaluateCpuCandidates(
       entry: validation.entry ?? candidate.entry
     };
     const projection = resolvedCandidate.sqlServerVisibleVcpu > 0 && cpuSamples.length > 0
-      ? projectCpuSamples(input, resolvedCandidate, cpuSamples)
+      ? cached(projectionCache, projectionCacheKey(resolvedCandidate), () =>
+          projectCpuSamples(input, resolvedCandidate, cpuSamples)
+        )
       : undefined;
-    const memory = resolvedCandidate.entry
-      ? evaluateCandidateMemory({
+    failures.push(...cpuProjectionFailures(projection, targetCpuP95));
+
+    let memory: MemoryCandidateEvaluation | undefined;
+    let memoryCoupling: MemoryCouplingEvaluation | undefined;
+    let tempdb: CandidateTempdbEvaluation | undefined;
+    let iops: CandidateIopsEvaluation | undefined;
+    let throughput: CandidateThroughputEvaluation | undefined;
+
+    if (resolvedCandidate.entry) {
+      memory = cached(memoryCache, memoryCacheKey(currentMemoryGb, resolvedCandidate.entry.memoryGb, requirements.memoryGb), () =>
+        evaluateCandidateMemory({
           workload: input.workload,
           currentMemoryGb,
-          candidateMemoryGb: resolvedCandidate.entry.memoryGb,
+          candidateMemoryGb: resolvedCandidate.entry!.memoryGb,
           fallbackRequiredMemoryGb: requirements.memoryGb
         })
-      : undefined;
-    const memoryCoupling = resolvedCandidate.entry
-      ? evaluateMemoryToIoCoupling({
+      );
+      memoryCoupling = cached(memoryCouplingCache, memoryCouplingCacheKey(currentMemoryGb, resolvedCandidate.entry.memoryGb, currentFamily, resolvedCandidate.entry.family), () =>
+        evaluateMemoryToIoCoupling({
           workload: input.workload,
           currentMemoryGb,
-          candidateMemoryGb: resolvedCandidate.entry.memoryGb,
+          candidateMemoryGb: resolvedCandidate.entry!.memoryGb,
           currentFamily,
-          candidateFamily: resolvedCandidate.entry.family
+          candidateFamily: resolvedCandidate.entry!.family
         })
-      : undefined;
-    const tempdb = resolvedCandidate.entry
-      ? evaluateCandidateTempdbPlacement({
+      );
+      tempdb = cached(tempdbCache, tempdbCacheKey(currentEntry, resolvedCandidate.entry), () =>
+        evaluateCandidateTempdbPlacement({
           physicalIo: input.workload.physicalIo,
           currentTempdbOnLocalStorage: currentEntry
             ? currentEntry.localInstanceStorage?.tempdbOnLocalStorage === true
             : undefined,
           candidateTempdbOnLocalStorage:
-            resolvedCandidate.entry.localInstanceStorage?.tempdbOnLocalStorage === true,
+            resolvedCandidate.entry!.localInstanceStorage?.tempdbOnLocalStorage === true,
           candidateLocalStorageCapacityGb:
-            resolvedCandidate.entry.localInstanceStorage?.capacityGb,
+            resolvedCandidate.entry!.localInstanceStorage?.capacityGb,
           tempdbUsage: input.workload.evidence?.tempdbUsage
         })
-      : undefined;
-    const iops = resolvedCandidate.entry
-      ? evaluateCandidateIops({
+      );
+      iops = cached(iopsCache, iopsCacheKey(resolvedCandidate.entry, input.currentConfig.provisionedIops, tempdb), () =>
+        evaluateCandidateIops({
           workload: input.workload,
           physicalIo: tempdb?.candidateNormalPath,
-          baselineIops: resolvedCandidate.entry.baselineIops,
-          maximumIops: resolvedCandidate.entry.maxIops,
+          baselineIops: resolvedCandidate.entry!.baselineIops,
+          maximumIops: resolvedCandidate.entry!.maxIops,
           configuredStorageIops: input.currentConfig.provisionedIops,
-          maximumBurstDurationMinutes: resolvedCandidate.entry.maximumIopsBurstDurationMinutes,
-          maximumBurstEventsPer24Hours: resolvedCandidate.entry.maximumIopsBurstEventsPer24Hours
+          maximumBurstDurationMinutes: resolvedCandidate.entry!.maximumIopsBurstDurationMinutes,
+          maximumBurstEventsPer24Hours: resolvedCandidate.entry!.maximumIopsBurstEventsPer24Hours
         })
-      : undefined;
-    const throughput = resolvedCandidate.entry
-      ? evaluateCandidateThroughput({
+      );
+      throughput = cached(throughputCache, throughputCacheKey(resolvedCandidate.entry, input.currentConfig.provisionedThroughputMbps, tempdb), () =>
+        evaluateCandidateThroughput({
           workload: input.workload,
           physicalIo: tempdb?.candidateNormalPath,
-          baselineThroughputMbps: resolvedCandidate.entry.baselineThroughputMbps,
-          maximumThroughputMbps: resolvedCandidate.entry.maxThroughputMbps,
+          baselineThroughputMbps: resolvedCandidate.entry!.baselineThroughputMbps,
+          maximumThroughputMbps: resolvedCandidate.entry!.maxThroughputMbps,
           configuredStorageThroughputMbps: input.currentConfig.provisionedThroughputMbps,
-          maximumBurstDurationMinutes: resolvedCandidate.entry.maximumThroughputBurstDurationMinutes,
-          maximumBurstEventsPer24Hours: resolvedCandidate.entry.maximumThroughputBurstEventsPer24Hours
+          maximumBurstDurationMinutes: resolvedCandidate.entry!.maximumThroughputBurstDurationMinutes,
+          maximumBurstEventsPer24Hours: resolvedCandidate.entry!.maximumThroughputBurstEventsPer24Hours
         })
-      : undefined;
+      );
 
-    failures.push(...(memory?.failures ?? []));
-    failures.push(...(tempdb?.failures ?? []));
-    failures.push(...(iops?.failures ?? []));
-    failures.push(...(throughput?.failures ?? []));
+      failures.push(...memory.failures);
+      failures.push(...tempdb.failures);
+      failures.push(...iops.failures);
+      failures.push(...throughput.failures);
+    }
 
-    failures.push(...cpuProjectionFailures(projection, targetCpuP95));
-
-    return {
+    const evaluation = {
       candidate: resolvedCandidate,
       projection,
       memory,
@@ -219,11 +236,85 @@ export function evaluateCpuCandidates(
       failures,
       valid: failures.length === 0
     };
-  });
+    evaluations.push(evaluation);
+    if (evaluation.valid && memoryPreferenceRank(evaluation) === 0) break;
+  }
 
   return evaluations.sort((left, right) =>
     memoryPreferenceRank(left) - memoryPreferenceRank(right)
   );
+}
+
+function cached<T>(cache: Map<string, T>, key: string, build: () => T): T {
+  const existing = cache.get(key);
+  if (existing) return existing;
+  const value = build();
+  cache.set(key, value);
+  return value;
+}
+
+function projectionCacheKey(candidate: CpuCandidate): string {
+  return [
+    candidate.instanceClass,
+    candidate.configurationType,
+    candidate.sqlServerVisibleVcpu,
+    candidate.coreCount ?? "",
+    candidate.threadsPerCore ?? "",
+    candidate.entry?.normalizedPerCoreCapacity ?? ""
+  ].join("|");
+}
+
+function memoryCacheKey(currentMemoryGb: number | undefined, candidateMemoryGb: number, fallbackRequiredMemoryGb: number): string {
+  return [currentMemoryGb ?? "", candidateMemoryGb, fallbackRequiredMemoryGb].join("|");
+}
+
+function memoryCouplingCacheKey(
+  currentMemoryGb: number | undefined,
+  candidateMemoryGb: number,
+  currentFamily: string,
+  candidateFamily: string
+): string {
+  return [currentMemoryGb ?? "", candidateMemoryGb, currentFamily, candidateFamily].join("|");
+}
+
+function tempdbCacheKey(currentEntry: InstanceCatalogEntry | undefined, candidateEntry: InstanceCatalogEntry): string {
+  return [
+    currentEntry?.localInstanceStorage?.tempdbOnLocalStorage === true,
+    candidateEntry.localInstanceStorage?.tempdbOnLocalStorage === true,
+    candidateEntry.localInstanceStorage?.capacityGb ?? ""
+  ].join("|");
+}
+
+function iopsCacheKey(
+  entry: InstanceCatalogEntry,
+  configuredStorageIops: number | undefined,
+  tempdb: CandidateTempdbEvaluation | undefined
+): string {
+  return [
+    tempdb?.transition ?? "",
+    tempdb?.capacityResult ?? "",
+    entry.baselineIops ?? "",
+    entry.maxIops,
+    configuredStorageIops ?? "",
+    entry.maximumIopsBurstDurationMinutes ?? "",
+    entry.maximumIopsBurstEventsPer24Hours ?? ""
+  ].join("|");
+}
+
+function throughputCacheKey(
+  entry: InstanceCatalogEntry,
+  configuredStorageThroughputMbps: number | undefined,
+  tempdb: CandidateTempdbEvaluation | undefined
+): string {
+  return [
+    tempdb?.transition ?? "",
+    tempdb?.capacityResult ?? "",
+    entry.baselineThroughputMbps ?? "",
+    entry.maxThroughputMbps,
+    configuredStorageThroughputMbps ?? "",
+    entry.maximumThroughputBurstDurationMinutes ?? "",
+    entry.maximumThroughputBurstEventsPer24Hours ?? ""
+  ].join("|");
 }
 
 function cpuProjectionFailures(

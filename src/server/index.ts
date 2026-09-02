@@ -33,6 +33,7 @@ export interface UploadedFileLike {
 export interface MultipartBuildInput {
   ownerEmail?: string;
   requesterEmail?: string;
+  customerName?: string;
   collectorPackages: readonly UploadedFileLike[];
   exportFormats?: string;
   catalog: readonly InstanceCatalogEntry[];
@@ -44,6 +45,7 @@ export type MultipartBuildResult =
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024, files: 40 } });
 const DEFAULT_FALLBACK_REGION = "us-east-1";
+const UNKNOWN_CURRENT_INSTANCE_CLASS = "unknown";
 
 interface CollectorRowPackage {
   row: CollectorExcelInput;
@@ -119,7 +121,11 @@ export function createCostOptimizationServer(options: CostOptimizationServerOpti
 }
 
 export async function buildManualUploadRequestFromMultipart(input: MultipartBuildInput): Promise<MultipartBuildResult> {
-  const access = validateOwnerAccess({ ownerEmail: input.ownerEmail, requesterEmail: input.requesterEmail });
+  const access = validateOwnerAccess({
+    ownerEmail: input.ownerEmail,
+    requesterEmail: input.requesterEmail,
+    customerName: input.customerName
+  });
   if (!access.ok) return { ok: false, statusCode: 403, errors: access.errors };
 
   const errors: ApiValidationError[] = [];
@@ -131,7 +137,11 @@ export async function buildManualUploadRequestFromMultipart(input: MultipartBuil
   const exportFormats = splitList(input.exportFormats).filter((format): format is ExportFormat => ["json", "csv", "pdf"].includes(format));
 
   if (spreadsheetRows.length === 0 && input.collectorPackages.length > 0) {
-    errors.push({ code: "COLLECTOR_SPREADSHEET_NOT_FOUND", field: "collectorPackages", message: "Collector upload must include the non-secret collector run manifest CSV inside the collector package." });
+    errors.push({
+      code: "COLLECTOR_CURRENT_CONFIG_INPUT_REQUIRED",
+      field: "collectorPackages",
+      message: "Collector upload must include enough non-secret current configuration input to optimize: ServerName and RDSSize are required in the collector run manifest or another CSV/XLSX file in the package."
+    });
   }
 
   if (errors.length > 0) return { ok: false, statusCode: 400, errors };
@@ -141,13 +151,14 @@ export async function buildManualUploadRequestFromMultipart(input: MultipartBuil
   for (const item of spreadsheetRows) {
     serverRowsPerPackage.set(item.packageFile, (serverRowsPerPackage.get(item.packageFile) ?? 0) + 1);
   }
+  const csvFilesByPackage = new Map<UploadedFileLike, Array<{ name: string; text: string }>>();
 
   for (const { row, packageFile } of spreadsheetRows) {
     let collectorCsvs: ExistingCollectorCsvSet;
     let workload: ReturnType<typeof normalizeExistingCollectorCsvs>;
     try {
-      collectorCsvs = extractCollectorCsvs(
-        packageFile,
+      collectorCsvs = extractCollectorCsvsFromFiles(
+        csvFilesForPackage(packageFile, csvFilesByPackage),
         row.rdsEndpoint,
         (serverRowsPerPackage.get(packageFile) ?? 0) > 1
       );
@@ -161,8 +172,13 @@ export async function buildManualUploadRequestFromMultipart(input: MultipartBuil
       });
       continue;
     }
+    const coreEvidenceErrors = coreCollectorEvidenceErrors(row, collectorCsvs);
+    if (coreEvidenceErrors.length > 0) {
+      errors.push(...coreEvidenceErrors);
+      continue;
+    }
     const currentConfig = currentConfigFromCollectorOutput(row, collectorCsvs, workload.totalDatabaseSizeGb, errors);
-    const requirements = requirementsFromCollectorOutput(row, workload, workload.iops.p95, workload.throughputMbps.p95, errors);
+    const requirements = requirementsFromCollectorOutput(row, collectorCsvs, workload, workload.iops.p95, workload.throughputMbps.p95, errors);
 
     if (!currentConfig || !requirements) continue;
     const regionalCatalog = catalogForSqlServerConfiguration(input.catalog, currentConfig);
@@ -172,7 +188,9 @@ export async function buildManualUploadRequestFromMultipart(input: MultipartBuil
     const currentConfigWithCatalogEvidence: CurrentRdsConfig = currentCatalogEntry ? currentConfig : {
       ...currentConfig,
       catalogMatch: false,
-      catalogComparisonNote: `Current RDSSize ${currentConfig.instanceClass} was not found in the ${currentConfig.region} catalog; current vCPU was derived from collector CPUINFO.`
+      catalogComparisonNote: currentConfig.instanceClass === UNKNOWN_CURRENT_INSTANCE_CLASS
+        ? currentConfig.catalogComparisonNote
+        : `Current RDSSize ${currentConfig.instanceClass} was not found in the ${currentConfig.region} catalog; current vCPU was derived from collector CPUINFO.`
     };
     currentConfigWithCatalogEvidence.sqlServerVisibleVcpu = currentVcpu;
     currentConfigWithCatalogEvidence.cpuConfigurationType = "collector";
@@ -185,6 +203,7 @@ export async function buildManualUploadRequestFromMultipart(input: MultipartBuil
       serverName: row.rdsEndpoint,
       collectorInput: row,
       collectorCsvs,
+      workload,
       currentConfig: currentConfigWithCatalogEvidence,
       currentVcpu,
       requirements,
@@ -200,7 +219,7 @@ export async function buildManualUploadRequestFromMultipart(input: MultipartBuil
     request: {
       catalog: [...input.catalog],
       uploads,
-      exportFormats: exportFormats.length > 0 ? exportFormats : ["json", "csv", "pdf"]
+      exportFormats
     }
   };
 }
@@ -210,8 +229,9 @@ async function handleAnalyze(req: Request, res: Response, catalog: InstanceCatal
   const built = await buildManualUploadRequestFromMultipart({
     ownerEmail,
     requesterEmail: requesterEmailFrom(req),
+    customerName: customerNameFrom(req),
     collectorPackages: files?.collectorPackages ?? [],
-    exportFormats: req.body.exportFormats,
+    exportFormats: stringBodyField(req, "exportFormats"),
     catalog
   });
 
@@ -238,6 +258,10 @@ async function parseCollectorRowsFromPackages(files: readonly UploadedFileLike[]
       if (spreadsheet) {
         const parsedRows = await parseCollectorSpreadsheet(spreadsheet);
         rows.push(...parsedRows.map((row) => ({ row, packageFile: file })));
+      } else {
+        const fallbackRows = await parseCurrentConfigRowsFromPackage(file);
+        const evidenceRows = fallbackRows.length > 0 ? fallbackRows : parseEvidenceOnlyRowsFromPackage(file);
+        rows.push(...evidenceRows.map((row) => ({ row, packageFile: file })));
       }
     } catch (error) {
       errors.push({
@@ -249,6 +273,75 @@ async function parseCollectorRowsFromPackages(files: readonly UploadedFileLike[]
   }
 
   return rows;
+}
+
+async function parseCurrentConfigRowsFromPackage(file: UploadedFileLike): Promise<CollectorExcelInput[]> {
+  const rows: CollectorExcelInput[] = [];
+  for (const candidate of currentConfigSpreadsheetCandidates(file)) {
+    const parsedRows = await parseCollectorSpreadsheet(candidate);
+    rows.push(...parsedRows.filter(hasMinimumCurrentConfigInput));
+  }
+  return rows;
+}
+
+function currentConfigSpreadsheetCandidates(file: UploadedFileLike): UploadedFileLike[] {
+  const extension = extname(file.originalname).toLowerCase();
+  if (extension === ".csv") {
+    const text = file.buffer.toString("utf8");
+    return csvHeaderHasCurrentConfigInput(text) ? [file] : [];
+  }
+  if (extension === ".xlsx") return [file];
+  if (extension !== ".zip") return [];
+
+  const zip = new AdmZip(file.buffer);
+  const candidates: UploadedFileLike[] = [];
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue;
+    const entryName = entry.entryName.toLowerCase();
+    if (entryName.endsWith(".csv")) {
+      const text = entry.getData().toString("utf8");
+      if (csvHeaderHasCurrentConfigInput(text)) {
+        candidates.push({ originalname: entry.entryName, buffer: Buffer.from(text, "utf8") });
+      }
+    } else if (entryName.endsWith(".xlsx")) {
+      candidates.push({ originalname: entry.entryName, buffer: entry.getData() });
+    }
+  }
+  return candidates;
+}
+
+function csvHeaderHasCurrentConfigInput(text: string): boolean {
+  const headers = Object.keys(parseCsv(text)[0] ?? {}).map(normalizeName);
+  return headers.some((header) => ["servername", "server_name", "rdsendpoint", "rds_endpoint", "endpoint"].includes(header))
+    && headers.some((header) => ["existingrdsinstanceclass", "existing_rds_instance_class", "existinginstanceclass", "existing_instance_class", "instanceclass", "instance_class", "rdssize", "rds_size"].includes(header));
+}
+
+function hasMinimumCurrentConfigInput(row: CollectorExcelInput): boolean {
+  return Boolean(row.rdsEndpoint?.trim() && row.existingInstanceClass?.trim());
+}
+
+function parseEvidenceOnlyRowsFromPackage(file: UploadedFileLike): CollectorExcelInput[] {
+  const serverNames = new Set<string>();
+  for (const csvFile of csvFilesFromPackage(file)) {
+    for (const row of parseCsv(csvFile.text)) {
+      const serverName = cell(row, "ServerName", "RdsEndpoint", "RDSEndpoint", "Endpoint");
+      if (serverName.trim()) serverNames.add(serverName.trim());
+    }
+  }
+  return [...serverNames].map((serverName) => ({
+    rdsEndpoint: serverName,
+    login: "",
+    password: "",
+    database: "msdb",
+    existingInstanceClass: ""
+  }));
+}
+
+function csvFilesFromPackage(file: UploadedFileLike): Array<{ name: string; text: string }> {
+  const extension = extname(file.originalname).toLowerCase();
+  if (extension === ".csv") return [{ name: file.originalname, text: file.buffer.toString("utf8") }];
+  if (extension === ".zip") return unzipCsvFiles(file.buffer);
+  return [];
 }
 
 function findSpreadsheetInPackage(file: UploadedFileLike): UploadedFileLike | undefined {
@@ -317,21 +410,42 @@ async function parseWorkbookRows(buffer: Buffer): Promise<CsvRow[]> {
 
 function extractCollectorCsvs(file: UploadedFileLike, serverName?: string, requireServerMatch = false) {
   const allFiles = extname(file.originalname).toLowerCase() === ".zip" ? unzipCsvFiles(file.buffer) : [{ name: file.originalname, text: file.buffer.toString("utf8") }];
+  return extractCollectorCsvsFromFiles(allFiles, serverName, requireServerMatch);
+}
+
+function csvFilesForPackage(
+  file: UploadedFileLike,
+  cache: Map<UploadedFileLike, Array<{ name: string; text: string }>>
+): Array<{ name: string; text: string }> {
+  const cached = cache.get(file);
+  if (cached) return cached;
+  const files = extname(file.originalname).toLowerCase() === ".zip"
+    ? unzipCsvFiles(file.buffer)
+    : [{ name: file.originalname, text: file.buffer.toString("utf8") }];
+  cache.set(file, files);
+  return files;
+}
+
+function extractCollectorCsvsFromFiles(
+  allFiles: Array<{ name: string; text: string }>,
+  serverName?: string,
+  requireServerMatch = false
+) {
   const files = selectCollectorCsvsForServer(allFiles, serverName, requireServerMatch);
 
   return {
-    cpuCsv: requiredCsv(excludeCsv(files, ["cpuinfo", "cpu_info"]), ["_cpu_", "cpu_csv"]),
-    cpuInfoCsv: optionalCsv(files, ["_cpuinfo_", "cpuinfo_csv", "cpu_info"]),
-    memoryCsv: optionalCsv(files, ["_mem_", "memory_csv", "mem_csv"]),
-    workloadSamplesCsv: optionalCsv(files, ["co_workload_samples"]),
-    memorySamplesCsv: optionalCsv(files, ["co_memory_samples"]),
+    cpuCsv: requiredCsv(excludeCsv(files, ["cpuinfo", "cpu_info"]), ["_cpu_", "cpu_csv"], isCpuCsv),
+    cpuInfoCsv: optionalCsv(files, ["_cpuinfo_", "cpuinfo_csv", "cpu_info"], isCpuInfoCsv),
+    memoryCsv: optionalCsv(files, ["_mem_", "memory_csv", "mem_csv"], isMemoryCsv),
+    workloadSamplesCsv: optionalCsv(files, ["co_workload_samples"], isWorkloadSamplesCsv),
+    memorySamplesCsv: optionalCsv(files, ["co_memory_samples"], isMemoryCsv),
     memoryDiagnosticsCsv: optionalCsv(files, ["co_memory_diagnostics"]),
-    ioCsv: requiredCsv(excludeCsv(files, ["co_file_io"]), ["_io_", "io_csv", "iops_csv", "file_io"]),
+    ioCsv: optionalCsv(excludeCsv(files, ["co_file_io"]), ["_io_", "io_csv", "iops_csv", "file_io"], isIoCsv),
     storageCsv: optionalCsv(files, ["storage", "db_size", "co_db_size"]),
     dbCpuRequestCsv: optionalCsv(files, ["co_db_cpu_request_sample", "db_cpu"]),
     waitStatsCsv: optionalCsv(files, ["co_wait_stats", "wait_stats"]),
     fileIoCsv: optionalCsv(excludeCsv(files, ["co_file_io_samples"]), ["co_file_io"]),
-    fileIoSamplesCsv: optionalCsv(files, ["co_file_io_samples"]),
+    fileIoSamplesCsv: optionalCsv(files, ["co_file_io_samples"], isFileIoSamplesCsv),
     tempdbUsageCsv: optionalCsv(files, ["co_tempdb_usage", "tempdb_usage"]),
     tempdbSamplesCsv: optionalCsv(files, ["co_tempdb_samples"]),
     editionCompatibilityCsv: optionalCsv(files, ["co_edition_compatibility", "edition_compatibility"])
@@ -364,20 +478,68 @@ export function selectCollectorCsvsForServer(
   return matched;
 }
 
-function requiredCsv(files: Array<{ name: string; text: string }>, aliases: string[]): string {
-  const match = optionalCsv(files, aliases);
+function requiredCsv(
+  files: Array<{ name: string; text: string }>,
+  aliases: string[],
+  headerMatcher?: (row: CsvRow) => boolean
+): string {
+  const match = optionalCsv(files, aliases, headerMatcher);
   if (!match) throw new Error(`Missing required collector CSV matching: ${aliases.join(", ")}`);
   return match;
 }
 
-function optionalCsv(files: Array<{ name: string; text: string }>, aliases: string[]): string | undefined {
+function optionalCsv(
+  files: Array<{ name: string; text: string }>,
+  aliases: string[],
+  headerMatcher?: (row: CsvRow) => boolean
+): string | undefined {
   const normalizedAliases = aliases.map(normalizeName);
-  return files.find((file) => normalizedAliases.some((alias) => normalizeName(file.name).includes(alias)))?.text;
+  const named = files.find((file) => normalizedAliases.some((alias) => normalizeName(file.name).includes(alias)))?.text;
+  if (named || !headerMatcher) return named;
+  return files.find((file) => headerMatcher(firstCsvRow(file.text)))?.text;
 }
 
 function excludeCsv(files: Array<{ name: string; text: string }>, aliases: string[]): Array<{ name: string; text: string }> {
   const normalizedAliases = aliases.map(normalizeName);
   return files.filter((file) => !normalizedAliases.some((alias) => normalizeName(file.name).includes(alias)));
+}
+
+function isCpuCsv(row: CsvRow): boolean {
+  return Boolean(cell(row, "SqlSerCpuUT", "SQLServerCpuUtilization", "CPU", "cpu"))
+    && Boolean(cell(row, "Collectiontime", "CollectionTime", "SQL_CollectionTime"));
+}
+
+function isCpuInfoCsv(row: CsvRow): boolean {
+  return Boolean(cell(row, "Logical CPU Count", "LogicalCpuCount", "cpu_count"))
+    && Boolean(cell(row, "SQL Edition", "SqlServerEdition", "Edition"))
+    && Boolean(cell(row, "SQL Version", "SqlServerVersion", "ProductVersion"));
+}
+
+function isMemoryCsv(row: CsvRow): boolean {
+  return Boolean(cell(
+    row,
+    "SQLCurrMemUsageMB",
+    "SqlCommittedMemoryMb",
+    "SQLMaxMemTargetMB",
+    "SqlTargetMemoryMb",
+    "OSTotalMemoryMB",
+    "OsTotalMemoryMb",
+    "PLE",
+    "OverallPleSeconds"
+  ));
+}
+
+function isIoCsv(row: CsvRow): boolean {
+  return hasSummaryIoValue(row);
+}
+
+function isWorkloadSamplesCsv(row: CsvRow): boolean {
+  return Boolean(cell(row, "SampleType", "sampleType", "sample_type"));
+}
+
+function isFileIoSamplesCsv(row: CsvRow): boolean {
+  return Boolean(cell(row, "num_of_reads", "num_of_bytes_read", "num_of_writes", "num_of_bytes_written"))
+    || isFileIoWorkloadSampleRow(row);
 }
 
 function currentConfigFromCollectorOutput(
@@ -423,7 +585,7 @@ function currentConfigFromCollectorOutput(
     region: String(region),
     regionSource: regionEvidence.source,
     regionFallbackReason: regionEvidence.reason,
-    instanceClass: row.existingInstanceClass,
+    instanceClass: row.existingInstanceClass?.trim() || UNKNOWN_CURRENT_INSTANCE_CLASS,
     sqlServerEdition: sqlServerEdition as CurrentRdsConfig["sqlServerEdition"],
     sqlServerVersion: String(sqlServerVersion),
     licenseModel: "unknown",
@@ -432,6 +594,10 @@ function currentConfigFromCollectorOutput(
     storageFactsMissing,
     multiAz
   };
+  if (!row.existingInstanceClass?.trim()) {
+    currentConfig.catalogMatch = false;
+    currentConfig.catalogComparisonNote = "Collector output did not include RDSSize; current class is unknown, so candidate fit is based on collector CPUINFO visible vCPU, workload evidence, and exact orderability for candidate classes.";
+  }
   if (allocatedStorageGb !== undefined) currentConfig.allocatedStorageGb = allocatedStorageGb;
   currentConfig.cpuSocketCount = positiveNumberFromCell(
     cell(cpuInfo, "Socket Count", "SocketCount", "socket_count")
@@ -443,25 +609,111 @@ function currentConfigFromCollectorOutput(
   return currentConfig;
 }
 
+function coreCollectorEvidenceErrors(row: CollectorExcelInput, collectorCsvs: ExistingCollectorCsvSet): ApiValidationError[] {
+  const errors: ApiValidationError[] = [];
+  const cpuInfo = firstCsvRow(collectorCsvs.cpuInfoCsv);
+  if (!collectorCsvs.cpuInfoCsv?.trim() || currentVcpuFromCpuInfo(collectorCsvs.cpuInfoCsv) <= 0) {
+    errors.push({
+      code: "COLLECTOR_CPUINFO_FACTS_REQUIRED",
+      serverName: row.rdsEndpoint,
+      field: "collectorPackages.cpuInfoCsv",
+      message: "Collector output must include CPUINFO evidence with a usable SQL-visible logical CPU count."
+    });
+  }
+  if (collectorCsvs.cpuInfoCsv?.trim() && (!cell(cpuInfo, "SQL Edition", "SqlServerEdition", "Edition") || !cell(cpuInfo, "SQL Version", "SqlServerVersion", "ProductVersion"))) {
+    errors.push({
+      code: "COLLECTOR_CPUINFO_FACTS_REQUIRED",
+      serverName: row.rdsEndpoint,
+      field: "collectorPackages.cpuInfoCsv",
+      message: "Collector output must include CPUINFO evidence with SQL edition and SQL version."
+    });
+  }
+  return errors;
+}
+
 function requirementsFromCollectorOutput(
   row: CollectorExcelInput,
+  collectorCsvs: ExistingCollectorCsvSet,
   workload: ReturnType<typeof normalizeExistingCollectorCsvs>,
   iops: number,
   throughputMbps: number,
   errors: ApiValidationError[]
 ): CandidateRequirements | undefined {
-  const memoryGb = workload.evidence?.memory?.requiredMemoryFloorGb;
+  const memoryGb = memoryRequirementGbFrom(workload);
   if (memoryGb === undefined || memoryGb <= 0) {
     errors.push({
       code: "COLLECTOR_MEMORY_FACTS_REQUIRED",
       serverName: row.rdsEndpoint,
       field: "collectorPackages.memoryCsv",
-      message: "Collector output must include enough memory evidence to reproduce the less-elastic memory floor."
+      message: "Collector output must include legacy memory CSV evidence or compact CO_WorkloadSamples memory rows with usable memory facts."
+    });
+    return undefined;
+  }
+
+  if (!hasRecognizedIoEvidence(collectorCsvs)) {
+    errors.push({
+      code: "COLLECTOR_IO_FACTS_REQUIRED",
+      serverName: row.rdsEndpoint,
+      field: "collectorPackages.ioCsv",
+      message: "Collector output must include legacy I/O CSV evidence or compact CO_WorkloadSamples file_io rows."
     });
     return undefined;
   }
 
   return { memoryGb, iops, throughputMbps };
+}
+
+function memoryRequirementGbFrom(workload: ReturnType<typeof normalizeExistingCollectorCsvs>): number | undefined {
+  const memory = workload.evidence?.memory;
+  const memoryMb = memory?.requiredMemoryFloorGb !== undefined
+    ? memory.requiredMemoryFloorGb * 1024
+    : memory?.observedSqlMemoryMb ?? memory?.osTotalMemoryMb;
+  return memoryMb !== undefined && memoryMb > 0 ? round2(memoryMb / 1024) : undefined;
+}
+
+function hasRecognizedIoEvidence(csvs: ExistingCollectorCsvSet): boolean {
+  if (csvs.fileIoSamplesCsv?.trim()) return true;
+  if (csvs.fileIoCsv?.trim()) return true;
+  if (csvs.workloadSamplesCsv?.trim() && parseCsv(csvs.workloadSamplesCsv).some(isFileIoWorkloadSampleRow)) {
+    return true;
+  }
+  if (!csvs.ioCsv?.trim()) return false;
+  const rows = parseCsv(csvs.ioCsv);
+  return rows.length > 0 && rows.some(hasSummaryIoValue);
+}
+
+function isFileIoWorkloadSampleRow(row: CsvRow): boolean {
+  return normalizeRowValue(row.SampleType ?? row.sampleType ?? row.sample_type) === "file_io";
+}
+
+function normalizeRowValue(value: string | undefined): string {
+  return (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
+}
+
+function hasSummaryIoValue(row: CsvRow): boolean {
+  return [
+    row.TotalIOPs,
+    row.TotalIOPS,
+    row.totaliops,
+    row.IOPS,
+    row.Iops,
+    row.iops,
+    row.TotalIopsPerSecond,
+    row.TotalIOPsPerSecond,
+    row.TotalIOPSPerSecond,
+    row.ReadIOPS,
+    row.ReadIops,
+    row.WriteIOPS,
+    row.WriteIops,
+    row.Throuput,
+    row.Throughput,
+    row.throughput,
+    row.ThroughputMbps,
+    row.ThroughputMBps,
+    row.ThroughputMiBps,
+    row.BRead,
+    row.BWritten
+  ].some((value) => value !== undefined && String(value).trim() !== "");
 }
 
 function parseRdsRegionWithEvidence(endpoint: string): { region: string; source: "endpoint" | "fallback"; reason?: string } {
@@ -494,6 +746,9 @@ function numberFromCell(value: string | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
 
 function positiveNumberFromCell(value: string | undefined): number | undefined {
   const parsed = numberFromCell(value);
@@ -560,8 +815,18 @@ function preferredFamilyTier(entry: InstanceCatalogEntry): number {
 
 function requesterEmailFrom(req: Request): string {
   const header = req.header("x-user-email") ?? req.header("x-owner-email");
-  const bodyValue = typeof req.body.requesterEmail === "string" ? req.body.requesterEmail : "";
+  const bodyValue = stringBodyField(req, "requesterEmail");
   return header || bodyValue;
+}
+
+function customerNameFrom(req: Request): string {
+  return stringBodyField(req, "customerName").trim();
+}
+
+function stringBodyField(req: Request, field: string): string {
+  const body = req.body as Record<string, unknown> | undefined;
+  const value = body?.[field];
+  return typeof value === "string" ? value : "";
 }
 
 function splitList(value: string | undefined): string[] {
