@@ -15,6 +15,24 @@ Before making any code, collector, UI, API, architecture, documentation, or test
 
 The agent must identify the exact spec, architecture, or task section that authorizes the change. If no section clearly authorizes the change, the agent must stop and ask for approval before editing.
 
+## Project Root and Visibility
+
+The canonical project root is:
+
+`C:\Users\bacrifai\Downloads\Projects\rdscostoptimization`
+
+All user-visible code, UI, tests, builds, and final verification must be performed in this project root unless the user explicitly asks to use a Codex worktree.
+
+Do not treat `.codex\worktrees\...` as the final project location. Worktree changes are not complete until the same intended changes are applied to the canonical project root and verified there.
+
+Before reporting that a UI or server change is visible, rebuild the runnable app output in the canonical project root with:
+
+`npm run build:app`
+
+Then verify the expected UI text or behavior exists in the generated `dist` output.
+
+Do not create new Codex tasks, worktree chats, forks, or background tasks unless the user explicitly asks. Work only in the current chat and current project location. If a separate task seems useful, ask the user first.
+
 ## Approval Rules
 
 - Do not make silent design or behavior decisions.

@@ -221,10 +221,11 @@ describe("manual upload HTML", () => {
 
     const html = renderManualUploadResultsHtml(buildManualUploadResultsView(response));
 
-    assert.ok(html.includes("CPU samples &gt;=70%"));
-    assert.ok(html.includes("Longest &gt;=70% streak"));
-    assert.ok(html.includes("Visual assessment result"));
-    assert.ok(html.includes("Assessment Result"));
+    assert.ok(html.includes("Server Decisions"));
+    assert.ok(html.includes("fleet-server-row-wrap"));
+    assert.ok(html.includes("<span>Current -> Target</span>"));
+    assert.ok(html.includes("<span>Reason</span>"));
+    assert.ok(html.includes("Open"));
     assert.ok(html.includes("Assessment Notes"));
     assert.ok(html.includes("These items limit a full assessment"));
     assert.ok(html.includes("RDS endpoint region could not be inferred"));
@@ -235,8 +236,11 @@ describe("manual upload HTML", () => {
     assert.ok(html.includes("Projected SQL CPU"));
     assert.ok(html.includes("Workload Fit Checks"));
     assert.equal(html.includes("Resource Gate Matrix"), false);
+    assert.ok(html.includes("<summary>Show candidate summary and evaluation history</summary>"));
+    assert.equal(/<details class="candidate-history-details"\s+open/.test(html), false);
     assert.ok(html.includes("Candidate Summary"));
-    assert.ok(html.includes("<summary>More details</summary>"));
+    assert.equal(html.includes("<summary>Show server evidence, blockers, gates, and candidate history</summary>"), false);
+    assert.equal(/<details class="fleet-server-row-wrap [^"]+"\s+open/.test(html), false);
     assert.ok(html.includes("<details class=\"supporting-evidence\">"));
     assert.ok(html.includes("<summary>Show supporting evidence</summary>"));
     assert.ok(html.includes("Supporting Evidence"));
@@ -244,18 +248,18 @@ describe("manual upload HTML", () => {
     assert.equal(html.includes("<h3>Advisory Signals</h3>"), false);
     assert.equal(/<details class="supporting-evidence"\s+open/.test(html), false);
     assert.ok(html.includes("Stay As Is"));
-    assert.ok(html.includes("Current instance retained"));
+    assert.ok(html.includes("Stay As Is"));
     assert.equal(html.includes("BLOCKED risk"), false);
     assert.equal(html.includes("Assessment Result</span>\n          <strong>Not Recommended</strong>"), false);
     assert.equal(html.includes("L2L Fallback"), false);
     assert.equal(html.includes("<dd>Blocked</dd>"), false);
     assert.ok(html.includes("Reasons to Stay As Is"));
     assert.ok(html.includes("issue-panel critical"));
-    assert.ok(html.includes("server-card not_recommended"));
-    assert.ok(html.includes("40% / 55%"));
+    assert.ok(html.includes("fleet-server-row-wrap not_recommended"));
+    assert.ok(html.includes("Projected SQL CPU"));
     assert.ok(html.includes("Total servers"));
     assert.ok(html.includes("Multi-server assessment"));
-    assert.ok(html.includes("Fleet Outcome Split"));
+    assert.ok(html.includes("Outcome groups"));
     assert.ok(html.includes("validation-sql"));
     assert.ok(html.includes("No servers in this outcome") === false);
     assert.ok(html.includes("Scaled Down to db.r8i.4xlarge"));
@@ -281,6 +285,37 @@ describe("manual upload HTML", () => {
     assert.equal(html.includes("SecretPassword123!"), false);
     assert.equal(html.includes("monthly savings"), false);
     assert.equal(html.includes("dollar savings"), false);
+  });
+
+  it("keeps single-server analysis details visible without the multi-server collapse wrapper", () => {
+    const optimized = buildWorkloadOptimizationReport({
+      serverName: "optimized-sql",
+      result: result()
+    });
+    const response: ManualUploadSuccessResponse = {
+      ok: true,
+      uploadCount: 1,
+      collectorInputs: [
+        {
+          rdsEndpoint: "optimized-sql.abc123.us-east-1.rds.amazonaws.com",
+          database: "msdb",
+          existingInstanceClass: "db.r8i.8xlarge",
+          region: "us-east-1"
+        }
+      ],
+      analysis: { results: [], batch: { results: [] } },
+      reports: [optimized],
+      summary: buildWorkloadOptimizationSummary([optimized]),
+      exports: { json: "{}", csv: "serverName", pdf: "JVBERi0xLjQ=" }
+    };
+
+    const html = renderManualUploadResultsHtml(buildManualUploadResultsView(response));
+
+    assert.ok(html.includes("Workload Fit Checks"));
+    assert.ok(html.includes("<summary>Show details and evidence</summary>"));
+    assert.ok(html.includes("<summary>Show candidate summary and evaluation history</summary>"));
+    assert.equal(/<details class="candidate-history-details"\s+open/.test(html), false);
+    assert.equal(html.includes("<summary>Show server evidence, blockers, gates, and candidate history</summary>"), false);
   });
 
   it("renders reason-only resource gates without n/a metric rows", () => {
@@ -379,8 +414,7 @@ describe("manual upload HTML", () => {
     assert.ok(html.includes("<strong>Evidence Check</strong>"));
     assert.ok(html.includes("Observed 1.01 collected hours is below the 48 hour minimum evidence window."));
     assert.ok(html.includes("Stay As Is"));
-    assert.ok(html.includes("Stay as is on db.r8i.8xlarge because Observed 1.01 collected hours is below the 48 hour minimum evidence window"));
-    assert.ok(html.includes("Current instance retained"));
+    assert.ok(html.includes("Stay As Is"));
     assert.ok(html.includes("Stay as is on the current instance (db.r8i.8xlarge) because insufficient evidence window"));
     assert.ok(html.includes("Why Stay As Is"));
     assert.ok(html.includes("Reassess only after"));

@@ -252,7 +252,10 @@ export function renderManualUploadResultsHtml(view: ManualUploadResultsViewModel
         ${metricTile("Stay as is", view.fleet.notOptimizedServers)}
       </section>
 
-      ${view.fleet.totalServers > 1 ? fleetOutcomeOverview(view) : ""}
+      ${view.fleet.totalServers > 1 ? renderFleetServerRows(view.servers) : `
+      <section class="server-list">
+        ${view.servers.map((server) => renderServerCard(server)).join("")}
+      </section>`}
 
       <section class="export-row" aria-label="Exports">
         ${view.exportActions.map((action) => action.available && action.href
@@ -260,60 +263,123 @@ export function renderManualUploadResultsHtml(view: ManualUploadResultsViewModel
           : `<button type="button" disabled>${escapeHtml(action.label)}</button>`).join("")}
       </section>
 
-      <section class="server-list">
-        ${view.servers.map(renderServerCard).join("")}
-      </section>
+      ${view.fleet.totalServers > 1 ? fleetOutcomeOverview(view) : ""}
     </main>
   `);
 }
 
 function fleetOutcomeOverview(view: ManualUploadResultsViewModel): string {
+  const groups = view.fleet.outcomeGroups.filter((group) => group.count > 0);
   return `
-    <section class="panel fleet-overview" aria-label="Multi-server fleet outcome">
-      <div class="fleet-overview-header">
-        <div>
-          <p class="section-kicker">Multi-server assessment</p>
-          <h2>Fleet Outcome Split</h2>
-        </div>
-        <span>${escapeHtml(String(view.fleet.totalServers))} server${view.fleet.totalServers === 1 ? "" : "s"}</span>
-      </div>
+    <details class="fleet-overview" aria-label="Multi-server fleet outcome">
+      <summary>
+        <span>Outcome groups</span>
+        <strong>${escapeHtml(String(view.fleet.totalServers))} server${view.fleet.totalServers === 1 ? "" : "s"}</strong>
+      </summary>
       <div class="fleet-outcome-grid">
-        ${view.fleet.outcomeGroups.map((group) => `
+        ${groups.map((group) => `
           <article class="fleet-outcome-card ${escapeAttribute(group.status)}">
             <div class="fleet-outcome-card-top">
               <strong>${escapeHtml(group.label)}</strong>
               <span>${escapeHtml(String(group.count))}</span>
             </div>
             <p>${escapeHtml(group.summary)}</p>
-            ${group.serverNames.length > 0
-              ? `<ul>${group.serverNames.map((name) => `<li>${escapeHtml(name)}</li>`).join("")}</ul>`
-              : `<p class="muted empty-outcome">No servers in this outcome.</p>`}
+            <ul>${group.serverNames.map((name) => `<li>${escapeHtml(name)}</li>`).join("")}</ul>
           </article>
         `).join("")}
       </div>
+    </details>
+  `;
+}
+
+function renderFleetServerRows(servers: readonly ServerResultsCard[]): string {
+  return `
+    <section class="panel fleet-server-rows" aria-labelledby="server-decisions-title">
+      <div class="fleet-list-header">
+        <div>
+          <p class="section-kicker">Multi-server assessment</p>
+          <h2 id="server-decisions-title">Server Decisions</h2>
+        </div>
+        <span>${escapeHtml(String(servers.length))} server${servers.length === 1 ? "" : "s"}</span>
+      </div>
+      <div class="fleet-server-row fleet-server-heading" aria-hidden="true">
+        <span>Action</span>
+        <span>Server</span>
+        <span>Current -> Target</span>
+        <span>Confidence</span>
+        <span>Top driver</span>
+        <span>Reason</span>
+        <span>Evidence</span>
+      </div>
+      ${servers.map(renderFleetServerRow).join("")}
     </section>
   `;
 }
 
-function renderServerCard(server: ServerResultsCard): string {
+function renderFleetServerRow(server: ServerResultsCard): string {
   return `
-    <article class="panel server-card ${server.outcome}" aria-labelledby="${domId(server.serverName)}-title">
-      <header class="server-header">
+    <details class="fleet-server-row-wrap ${server.outcome}" aria-labelledby="${domId(server.serverName)}-row-title">
+      <summary class="fleet-server-row">
+        <span class="fleet-row-outcome">${escapeHtml(server.statusLabel)}</span>
+        <strong id="${domId(server.serverName)}-row-title">${escapeHtml(server.serverName)}</strong>
+        <span>${escapeHtml(moveSummary(server))}</span>
+        <span>${escapeHtml(server.evidenceWindow.confidence)}</span>
+        <span>${escapeHtml(topDriverSummary(server))}</span>
+        <span class="fleet-row-reason">${escapeHtml(shortScanNote(server))}</span>
+        <span class="fleet-row-review">Open</span>
+      </summary>
+      <div class="fleet-row-detail-body">
+        ${server.assessmentNotes.length > 0 ? assessmentNotesPanel(server) : ""}
+        ${issuePanel(server)}
+        ${server.resourceGates.length > 0 ? resourceGateMatrix(server) : ""}
+        ${fullConfigurationComparison(server)}
+        ${moreDetailsContent(server)}
+      </div>
+    </details>
+  `;
+}
+
+function moveSummary(server: ServerResultsCard): string {
+  if (server.current.instanceClass === server.optimized.instanceClass) {
+    return `Keep ${server.current.instanceClass}`;
+  }
+  return `${server.current.instanceClass} -> ${server.optimized.instanceClass}`;
+}
+
+function shortScanNote(server: ServerResultsCard): string {
+  const reasons = scanReasons(server).filter((reason) =>
+    !/^outcome:/i.test(reason) &&
+    !/^compute changes/i.test(reason)
+  );
+  const source = reasons[0] ?? server.actionPlan[0] ?? server.decisionSummary;
+  return conciseText(source, 120);
+}
+
+function conciseText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  const clipped = normalized.slice(0, maxLength - 1).trimEnd();
+  const lastBreak = clipped.lastIndexOf(" ");
+  return `${(lastBreak > 80 ? clipped.slice(0, lastBreak) : clipped).trimEnd()}...`;
+}
+function renderServerCard(server: ServerResultsCard, collapsePerServerDetail = false): string {
+  return `
+    <article class="panel server-card ${server.outcome}${collapsePerServerDetail ? " compact-multi" : ""}" aria-labelledby="${domId(server.serverName)}-title">
+      <header class="server-header compact-server-header">
         <div>
           <p class="eyebrow">${escapeHtml(server.statusLabel)}</p>
           <h2 id="${domId(server.serverName)}-title">${escapeHtml(server.serverName)}</h2>
-          <p class="decision-summary">${escapeHtml(server.decisionSummary)}</p>
         </div>
         <span class="outcome-pill">${escapeHtml(server.statusLabel)}</span>
       </header>
 
-      <section class="assessment-board" aria-label="Visual assessment result">
+      <section class="assessment-board compact-assessment-board" aria-label="Assessment result summary">
         <div class="decision-panel">
-          <span class="value-label">Assessment Result</span>
+          <span class="value-label">Outcome</span>
           <strong>${escapeHtml(server.statusLabel)}</strong>
           <p>${escapeHtml(server.assessmentDetail)}</p>
         </div>
-        <div class="metric-strip">
+        <div class="metric-strip compact-metric-strip">
           ${server.visualMetrics.map((metric) => `
             <div class="fit-metric">
               <span>${escapeHtml(metric.label)}</span>
@@ -324,44 +390,63 @@ function renderServerCard(server: ServerResultsCard): string {
         </div>
       </section>
 
-      ${server.assessmentNotes.length > 0 ? assessmentNotesPanel(server) : ""}
+      ${serverScanSummary(server)}
 
-      <div class="comparison two-column">
-        <div>
-          <h3>Current</h3>
-          ${definitionList([
-            ["Instance", server.current.instanceClass],
-            ["Edition", server.current.sqlServerEdition],
-            ["Version", server.current.sqlServerVersion],
-            ["License", server.current.licenseModel],
-            ["Multi-AZ", server.current.multiAz],
-            ["SQL-visible vCPU", server.currentVisibleVcpu],
-            ["CPU P95", server.cpuP95Pct],
-            [`CPU samples >=${server.highCpuThresholdPct}%`, server.highCpuSamplePct],
-            [`Longest >=${server.highCpuThresholdPct}% streak`, `${server.longestHighCpuStreakMinutes} min`]
-          ])}
-        </div>
-        <div>
-          <h3>${escapeHtml(server.optimizedTitle)}</h3>
-          ${definitionList([
-            ["Instance", server.optimized.instanceClass],
-            ["Edition", server.optimized.sqlServerEdition],
-            ["Version", server.optimized.sqlServerVersion],
-            ["License", server.optimized.licenseModel],
-            ["Multi-AZ", server.optimized.multiAz],
-            ["SQL-visible vCPU", server.candidateVisibleVcpu],
-            ["CPU configuration", server.candidateCpuConfiguration]
-          ])}
-        </div>
-      </div>
-
-      ${issuePanel(server)}
-      ${server.resourceGates.length > 0 ? resourceGateMatrix(server) : ""}
-      ${moreDetails(server)}
+      ${collapsePerServerDetail ? serverDetailDisclosure(server) : moreDetails(server)}
     </article>
   `;
 }
 
+function serverScanSummary(server: ServerResultsCard): string {
+  const reasons = scanReasons(server).slice(0, 3);
+  const nextAction = server.actionPlan[0];
+  return `
+    <section class="customer-snapshot" aria-label="Customer decision snapshot">
+      <div class="snapshot-grid">
+        ${snapshotItem("Current", server.current.instanceClass)}
+        ${snapshotItem(server.optimizedTitle, server.optimized.instanceClass)}
+        ${snapshotItem("Confidence", server.evidenceWindow.confidence)}
+        ${snapshotItem("Top driver", topDriverSummary(server))}
+      </div>
+      ${reasons.length > 0 ? `
+        <div class="snapshot-notes">
+          <h3>${server.outcome === "not_recommended" ? "Why As Is" : "Why Optimized"}</h3>
+          <ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>
+        </div>
+      ` : ""}
+      ${nextAction ? `
+        <div class="snapshot-next-action">
+          <h3>Next Action</h3>
+          <p>${escapeHtml(nextAction)}</p>
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+function snapshotItem(label: string, value: string): string {
+  return `
+    <div class="snapshot-item">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
+function scanReasons(server: ServerResultsCard): string[] {
+  const outcomeReasons = server.outcome === "not_recommended" ? server.whyNotOptimized : server.whyOptimized;
+  return unique([
+    ...outcomeReasons,
+    ...server.blockers,
+    ...server.assessmentNotes
+  ]).filter(Boolean);
+}
+
+function topDriverSummary(server: ServerResultsCard): string {
+  const driver = server.topDatabaseDrivers[0];
+  if (!driver) return "Server-level";
+  return `${driver.databaseName}${driver.drivers === "none" ? "" : ` (${driver.drivers})`}`;
+}
 function assessmentNotesPanel(server: ServerResultsCard): string {
   return `
     <section class="assessment-note-panel" aria-label="Assessment notes">
@@ -384,10 +469,70 @@ function issuePanel(server: ServerResultsCard): string {
   `;
 }
 
+function serverDetailDisclosure(server: ServerResultsCard): string {
+  return `
+    <details class="multi-server-details">
+      <summary>Show server evidence, blockers, gates, and candidate history</summary>
+      ${server.assessmentNotes.length > 0 ? assessmentNotesPanel(server) : ""}
+      ${issuePanel(server)}
+      ${server.resourceGates.length > 0 ? resourceGateMatrix(server) : ""}
+      ${fullConfigurationComparison(server)}
+      ${moreDetailsContent(server)}
+    </details>
+  `;
+}
+
 function moreDetails(server: ServerResultsCard): string {
   return `
     <details class="more-details">
-      <summary>More details</summary>
+      <summary>Show details and evidence</summary>
+      ${server.assessmentNotes.length > 0 ? assessmentNotesPanel(server) : ""}
+      ${issuePanel(server)}
+      ${server.resourceGates.length > 0 ? resourceGateMatrix(server) : ""}
+      ${fullConfigurationComparison(server)}
+      ${moreDetailsContent(server)}
+    </details>
+  `;
+}
+
+function fullConfigurationComparison(server: ServerResultsCard): string {
+  return `
+    <section class="detail-section configuration-details" aria-label="Configuration details">
+      <h3>Configuration Details</h3>
+      <div class="comparison two-column">
+        <div>
+          <h4>Current</h4>
+          ${definitionList([
+            ["Instance", server.current.instanceClass],
+            ["Edition", server.current.sqlServerEdition],
+            ["Version", server.current.sqlServerVersion],
+            ["License", server.current.licenseModel],
+            ["Multi-AZ", server.current.multiAz],
+            ["SQL-visible vCPU", server.currentVisibleVcpu],
+            ["CPU P95", server.cpuP95Pct],
+            [`CPU samples >=${server.highCpuThresholdPct}%`, server.highCpuSamplePct],
+            [`Longest >=${server.highCpuThresholdPct}% streak`, `${server.longestHighCpuStreakMinutes} min`]
+          ])}
+        </div>
+        <div>
+          <h4>${escapeHtml(server.optimizedTitle)}</h4>
+          ${definitionList([
+            ["Instance", server.optimized.instanceClass],
+            ["Edition", server.optimized.sqlServerEdition],
+            ["Version", server.optimized.sqlServerVersion],
+            ["License", server.optimized.licenseModel],
+            ["Multi-AZ", server.optimized.multiAz],
+            ["SQL-visible vCPU", server.candidateVisibleVcpu],
+            ["CPU configuration", server.candidateCpuConfiguration]
+          ])}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function moreDetailsContent(server: ServerResultsCard): string {
+  return `
       <section class="detail-section cpu-evidence">
         <h3>CPU Projection</h3>
         ${definitionList([
@@ -430,15 +575,13 @@ function moreDetails(server: ServerResultsCard): string {
       ${server.memoryAssessment.length > 0 ? listSection("Memory Assessment", server.memoryAssessment) : ""}
       ${server.ioAssessment.length > 0 ? listSection("Instance IOPS and Throughput", server.ioAssessment) : ""}
       ${server.tempdbAssessment.length > 0 ? listSection("tempdb Placement and Capacity", server.tempdbAssessment) : ""}
-      ${server.candidateSummary.length > 0 ? candidateSummary(server) : ""}
       ${server.limitingResources.length > 0 ? listSection("Resource Gates and Limiting Resources", server.limitingResources) : ""}
-      ${server.candidateEvaluations.length > 0 ? listSection("Candidate Evaluation History", server.candidateEvaluations) : ""}
+      ${candidateHistoryDetails(server)}
       ${server.whyOptimized.length > 0 ? listSection("Why Optimized", server.whyOptimized) : ""}
       ${server.whyNotOptimized.length > 0 ? listSection("Why Stay As Is", server.whyNotOptimized) : ""}
       ${server.topDatabaseDrivers.length > 0 ? databaseTable(server) : ""}
       ${server.supportingEvidence.length > 0 ? supportingEvidenceDetails(server.supportingEvidence) : ""}
       ${server.actionPlan.length > 0 ? listSection("Action Plan", server.actionPlan) : ""}
-    </details>
   `;
 }
 
@@ -474,6 +617,17 @@ function resourceGateMatrix(server: ServerResultsCard): string {
         `).join("")}
       </div>
     </section>
+  `;
+}
+
+function candidateHistoryDetails(server: ServerResultsCard): string {
+  if (server.candidateSummary.length === 0 && server.candidateEvaluations.length === 0) return "";
+  return `
+    <details class="candidate-history-details">
+      <summary>Show candidate summary and evaluation history</summary>
+      ${server.candidateSummary.length > 0 ? candidateSummary(server) : ""}
+      ${server.candidateEvaluations.length > 0 ? listSection("Candidate Evaluation History", server.candidateEvaluations) : ""}
+    </details>
   `;
 }
 
@@ -1235,20 +1389,38 @@ function pageShell(title: string, body: string): string {
     .metric span { color: var(--muted); font-size: 13px; font-weight: 750; }
     .metric strong { display: block; font-size: 32px; line-height: 1; margin-top: 8px; }
     .fleet-overview {
-      border-top: 4px solid var(--info);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      margin-bottom: 16px;
+      padding: 14px 16px;
     }
-    .fleet-overview-header {
+    .fleet-overview > summary,
+    .fleet-list-header {
       display: flex;
       justify-content: space-between;
       gap: 14px;
       align-items: start;
+    }
+    .fleet-overview > summary {
+      cursor: pointer;
+      font-weight: 850;
+      list-style-position: inside;
+    }
+    .fleet-overview[open] > summary {
       margin-bottom: 14px;
     }
-    .fleet-overview-header h2 {
+    .fleet-list-header {
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+    }
+    .fleet-list-header h2 {
       margin: 0;
       font-size: 22px;
     }
-    .fleet-overview-header span {
+    .fleet-overview > summary strong,
+    .fleet-list-header > span {
       border: 1px solid var(--line);
       border-radius: 999px;
       background: var(--panel-soft);
@@ -1258,9 +1430,89 @@ function pageShell(title: string, body: string): string {
       padding: 7px 10px;
       white-space: nowrap;
     }
+    .fleet-server-rows {
+      border-top: 4px solid var(--info);
+    }
+    .fleet-server-row {
+      display: grid;
+      grid-template-columns: minmax(125px, 0.85fr) minmax(180px, 1.5fr) minmax(145px, 1fr) minmax(78px, 0.55fr) minmax(120px, 0.95fr) minmax(180px, 1.55fr) minmax(72px, 82px);
+      gap: 12px;
+      align-items: center;
+    }
+    .fleet-server-heading {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+    .fleet-server-row-wrap {
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--line-strong);
+      border-radius: 8px;
+      background: #fff;
+      display: block;
+      margin-top: 8px;
+      overflow: hidden;
+    }
+    .fleet-server-row-wrap.recommended {
+      border-left-color: var(--accent);
+    }
+    .fleet-server-row-wrap.aggressive_optimization {
+      border-left-color: var(--warn);
+    }
+    .fleet-server-row-wrap.not_recommended {
+      border-left-color: var(--danger);
+    }
+    .fleet-server-row-wrap > summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 12px 14px;
+    }
+    .fleet-server-row-wrap > summary::-webkit-details-marker {
+      display: none;
+    }
+    .fleet-server-row-wrap > summary strong {
+      overflow-wrap: anywhere;
+    }
+    .fleet-row-outcome {
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--panel-soft);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 850;
+      padding: 7px 10px;
+      width: fit-content;
+    }
+    .fleet-server-row-wrap.not_recommended .fleet-row-outcome {
+      color: var(--danger);
+      background: #fff5f3;
+      border-color: rgba(180, 35, 24, 0.38);
+    }
+    .fleet-row-reason {
+      color: var(--muted);
+      line-height: 1.35;
+    }
+    .fleet-row-review {
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 850;
+      justify-self: stretch;
+      min-width: 64px;
+      padding: 7px 10px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .fleet-row-detail-body {
+      border-top: 1px solid var(--line);
+      padding: 0 14px 14px;
+    }
     .fleet-outcome-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 12px;
     }
     .fleet-outcome-card {
@@ -1269,7 +1521,6 @@ function pageShell(title: string, body: string): string {
       border-radius: 8px;
       background: #ffffff;
       padding: 14px;
-      min-height: 170px;
     }
     .fleet-outcome-card.recommended {
       border-left-color: var(--accent);
@@ -1312,9 +1563,6 @@ function pageShell(title: string, body: string): string {
     .fleet-outcome-card li {
       overflow-wrap: anywhere;
       font-weight: 650;
-    }
-    .empty-outcome {
-      font-style: italic;
     }
     .server-card {
       position: relative;
@@ -1510,25 +1758,33 @@ function pageShell(title: string, body: string): string {
     }
     .detail-section { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 14px; }
     .detail-section h3 { margin: 0 0 10px; }
-    .more-details {
+    .more-details, .multi-server-details {
       border-top: 1px solid var(--line);
       margin-top: 14px;
       padding-top: 14px;
     }
-    .more-details summary {
+    .multi-server-details {
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 13px 14px;
+    }
+    .more-details summary, .multi-server-details summary {
       cursor: pointer;
       color: var(--ink);
       font-weight: 850;
       list-style-position: inside;
     }
-    .more-details[open] summary {
+    .more-details[open] summary, .multi-server-details[open] summary {
       margin-bottom: 4px;
     }
+    .candidate-history-details,
     .supporting-evidence {
       border-top: 1px solid var(--line);
       margin-top: 14px;
       padding-top: 12px;
     }
+    .candidate-history-details summary,
     .supporting-evidence summary {
       cursor: pointer;
       font-weight: 850;
@@ -1602,7 +1858,7 @@ function pageShell(title: string, body: string): string {
     th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 10px; vertical-align: top; }
     th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
     @media (max-width: 900px) {
-      .workspace-grid, .business-grid, .outcome-grid, .process-panel, .process-steps, .proof-strip, .persona-panel, .article-layout, .takeaway-grid, .driver-grid, .strategy-timeline, .offering-services, .service-grid, .two, .summary-grid, .comparison, .assessment-board, .metric-strip, .gate-grid, .candidate-grid, .fleet-outcome-grid { grid-template-columns: 1fr; }
+      .workspace-grid, .business-grid, .outcome-grid, .process-panel, .process-steps, .proof-strip, .persona-panel, .article-layout, .takeaway-grid, .driver-grid, .strategy-timeline, .offering-services, .service-grid, .two, .summary-grid, .comparison, .assessment-board, .metric-strip, .gate-grid, .candidate-grid, .fleet-outcome-grid, .snapshot-grid, .fleet-server-row { grid-template-columns: 1fr; }
       .service-actions { justify-content: flex-start; }
       .article-nav { position: static; }
       .page-header, .offering-hero, .live-hero, .guide-hero { align-items: start; flex-direction: column; }
@@ -1624,8 +1880,8 @@ function pageShell(title: string, body: string): string {
       .article-section h2 { font-size: 24px; }
       .board-grid { grid-template-columns: 1fr; }
       .server-header { display: block; }
-      .fleet-overview-header { display: block; }
-      .fleet-overview-header span { display: inline-block; margin-top: 10px; }
+      .fleet-overview > summary, .fleet-list-header { display: block; }
+      .fleet-overview > summary strong, .fleet-list-header > span { display: inline-block; margin-top: 10px; }
       .outcome-pill, .compare { display: inline-block; margin-top: 10px; }
       dl { grid-template-columns: 1fr; gap: 4px; }
       dd { margin-bottom: 8px; }
