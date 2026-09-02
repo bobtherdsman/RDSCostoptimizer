@@ -151,8 +151,28 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.equal(evaluation.pressureState, "no_direct_pressure_detected");
   });
 
-  it("blocks a RAM reduction when a direct low-memory signal is present", () => {
-    const memorySamples = [sample(0), sample(1, { memoryGrantsPending: 1 }), sample(2)];
+  it("treats one isolated low-memory event as warning context", () => {
+    const memorySamples = Array.from({ length: 100 }, (_, index) =>
+      sample(index, index === 50 ? { processPhysicalMemoryLow: true } : {})
+    );
+    const evidence = buildMemoryEvidenceFromSamples(memorySamples);
+    const evaluation = evaluateCandidateMemory({
+      workload: workload(memorySamples),
+      currentMemoryGb: 128,
+      candidateMemoryGb: 64
+    });
+
+    assert.equal(evidence?.directPressureState, "isolated_pressure_detected");
+    assert.equal(evaluation.valid, true);
+    assert.equal(evaluation.pressureState, "isolated_pressure_detected");
+    assert.equal(evaluation.evidenceConfidence, "medium");
+    assert.deepEqual(evaluation.failures, []);
+  });
+
+  it("blocks a RAM reduction when low-memory pressure is repeated", () => {
+    const memorySamples = Array.from({ length: 100 }, (_, index) =>
+      sample(index, index >= 10 && index < 20 ? { processPhysicalMemoryLow: true } : {})
+    );
     const evaluation = evaluateCandidateMemory({
       workload: workload(memorySamples),
       currentMemoryGb: 128,
@@ -160,6 +180,22 @@ describe("memory pressure and less-elastic working-set floor", () => {
     });
 
     assert.equal(evaluation.valid, false);
+    assert.equal(evaluation.pressureState, "pressure_detected");
+    assert.ok(evaluation.failures.some((failure) => failure.startsWith("MEMORY_PRESSURE_DETECTED")));
+  });
+
+  it("blocks a RAM reduction when Memory Grants Pending is sustained", () => {
+    const memorySamples = Array.from({ length: 100 }, (_, index) =>
+      sample(index, index >= 20 ? { memoryGrantsPending: 1 } : {})
+    );
+    const evaluation = evaluateCandidateMemory({
+      workload: workload(memorySamples),
+      currentMemoryGb: 128,
+      candidateMemoryGb: 64
+    });
+
+    assert.equal(evaluation.valid, false);
+    assert.equal(evaluation.pressureState, "pressure_detected");
     assert.ok(evaluation.failures.some((failure) => failure.startsWith("MEMORY_PRESSURE_DETECTED")));
   });
 

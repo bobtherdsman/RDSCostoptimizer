@@ -322,6 +322,7 @@ export interface MemoryEvidence {
   evidenceConfidence?: "high" | "medium" | "low";
   evidenceCompleteness?: string[];
   workingSetValidationRequired?: boolean;
+  directPressureState?: "pressure_detected" | "isolated_pressure_detected" | "no_direct_pressure_detected" | "insufficient_evidence";
   pressureSignals: string[];
 }
 
@@ -526,7 +527,7 @@ export interface OptimizationResult {
     memoryReductionPct?: number;
     memoryRequiredFloorGb?: number;
     memoryHeadroomPct?: number;
-    memoryPressureState?: "pressure_detected" | "no_direct_pressure_detected" | "insufficient_evidence";
+    memoryPressureState?: "pressure_detected" | "isolated_pressure_detected" | "no_direct_pressure_detected" | "insufficient_evidence";
     memoryEvidenceConfidence?: "high" | "medium" | "low";
     memoryWorkingSetValidationRequired?: boolean;
     memorySignalsUsed?: string[];

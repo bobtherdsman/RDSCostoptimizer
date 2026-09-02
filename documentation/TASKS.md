@@ -358,6 +358,46 @@ Source: Sections 3 through 10 and the Final Verified Kentra Algorithm.
 - [x] Add regression coverage for every correction above.
 - [x] Update the verified requirements matrix only after production, harness, collector, samples, and tests prove each correction.
 
+## Task 19 - Catalog-Owned Candidate Family Preference Metadata
+
+Source: User-approved hardcoding audit follow-up; `COST_OPTIMIZATION_END_TO_END_SPEC.md` Section 7 Candidate Catalog; `ARCHITECTURE.md` Working Sizing Rule Architecture and Candidate Catalog; `HARNESS_CONTRACT.md` Change Rule.
+
+- [ ] Move mutable instance-family preference and fallback metadata out of hardcoded production and harness family arrays.
+- [ ] Extend the candidate catalog or a versioned catalog-adjacent configuration with approved family preference metadata, such as lead, fallback, avoid, deprecated, or rank fields.
+- [ ] Keep AWS capability facts in the generated catalog: Region, edition, exact engine version, SQL Server-visible vCPU, Optimize CPU configurations, memory, sustained/burst IOPS, sustained/burst throughput, Multi-AZ, local-instance-store, and normalized per-core capacity when available.
+- [ ] Keep verified algorithm thresholds hardcoded or spec-owned; do not move CPU, memory, IOPS, throughput, evidence-window, or memory-coupling thresholds into mutable AWS catalog data.
+- [ ] Update candidate generation and accepted-candidate ordering to read family preference from catalog/config metadata rather than hardcoded arrays.
+- [ ] Update the independent harness with separate validation code that checks preserved candidate ordering against the same approved catalog/config metadata without importing production optimizer logic.
+- [ ] Add regression coverage proving that a family preference change can be made in catalog/config metadata without editing production ordering code or harness hardcoded family arrays.
+- [ ] Preserve deterministic candidate ordering and explain fallback-family selection when no equal-or-better preferred family path is orderable or when preferred-family candidates fail preserved workload gates.
+
+## Task 20 - Scheduled Catalog Refresh and New Offering Detection
+
+Source: User-approved catalog refresh operations follow-up; `COST_OPTIMIZATION_END_TO_END_SPEC.md` Section 7 Candidate Catalog; `ARCHITECTURE.md` Candidate Catalog; `HARNESS_CONTRACT.md` Change Rule.
+
+- [ ] Add a scheduled catalog refresh workflow that runs `npm run catalog:refresh` for the approved Region list.
+- [ ] Keep catalog refresh changes versioned and reviewed; do not silently refresh catalog data at production request time.
+- [ ] Generate a refresh summary that reports catalog entry count deltas, new instance families/classes, removed or no-longer-orderable classes, changed SQL Server-visible vCPU or Optimize CPU configurations, changed memory, changed sustained/burst IOPS, changed sustained/burst throughput, and changed local-instance-store/tempdb facts.
+- [ ] Run the full project verification path after refresh, including catalog, optimizer, harness, server, and gold-sample regression coverage.
+- [ ] Open a reviewable change when refreshed catalog output differs from the committed catalog.
+- [ ] Require human review before refreshed catalog data can affect production optimization outcomes.
+- [ ] Preserve exact AWS SQL Server processor metadata requirements: entries without AWS SQL Server-visible CPU/core/thread provenance must remain excluded from runtime candidates.
+- [ ] Keep the approved Region list explicit and auditable instead of relying only on a default fallback Region.
+
+## Task 21 - Rules-Based Regression Suite Setup
+
+Source: User-approved rules-suite follow-up; `documentation/RULES_BASED_SUITE_SPEC.md`; `HARNESS_CONTRACT.md` Change Rule.
+
+- [ ] Create `documentation/rules-migration-map.md` by enumerating every `it(...)` and distinct assertion across the existing 19 test files, mapping each old test behavior to a stable rule id.
+- [ ] Create `documentation/rules.md` with exactly the required columns: `id | area | status | invariant | input/fixture | expected | pins`.
+- [ ] Populate `documentation/rules.md` with every migrated behavior from the current suite plus the seed parser, fuzz, and gold-fixture rules defined in `documentation/RULES_BASED_SUITE_SPEC.md`.
+- [ ] Add rule-tagged tests whose titles start with their rule id and cover every `enforced` and `expected-gap` rule.
+- [ ] Add the rules coverage-guard test so orphan rules, orphan rule-tagged tests, unexpected passing `expected-gap` rules, and missing enforced coverage fail CI.
+- [ ] Add GOLD-11 through GOLD-14 fixtures under `samples/tool-regression/` and commit `samples/tool-regression/CHECKSUMS.txt` with SHA-256 hashes for every gold ZIP.
+- [ ] Retire or fold superseded old tests only after the migration map proves 100% coverage and the rules coverage guard is green.
+- [ ] Keep this as a test/fixture/spec restructure only; do not change engine behavior in `src/optimizer`, `src/io`, `src/memory`, `src/edition`, `src/catalog`, `src/parser`, or `src/harness` logic while implementing this task.
+- [ ] Verify `npm test` is green on Windows and Linux CI after the rule suite migration.
+
 ## Deferred by the Verified Document
 
 - [x] Keep storage provisioning optimization out of the active workload flow and reports in this phase.

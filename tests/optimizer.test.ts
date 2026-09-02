@@ -170,7 +170,7 @@ describe("requiredVcpuForCpuTarget", () => {
 });
 
 describe("optimizeComputeCandidate", () => {
-  it("selects the first caller-ordered candidate that passes all fit checks", () => {
+  it("selects a safe caller-ordered candidate that passes all fit checks", () => {
     const result = optimizeComputeCandidate({
       currentConfig,
       workload: workload(15),
@@ -195,6 +195,141 @@ describe("optimizeComputeCandidate", () => {
     ));
     assert.equal(result.candidateEvaluations.filter((candidate) => candidate.selected).length, 1);
     assert.ok(result.passedChecks.includes("COLLECTION_WINDOW_MEDIUM_CONFIDENCE"));
+  });
+
+  it("supports a same-size generational move when SQL-visible vCPU differs", () => {
+    const sameSizeCatalog: InstanceCatalogEntry[] = [
+      {
+        instanceClass: "db.m5.4xlarge",
+        region: "us-east-1",
+        family: "m5",
+        size: "4xlarge",
+        vcpu: 16,
+        sqlServerDefaultVcpuSource: "aws-processor-features",
+        memoryGb: 64,
+        baselineIops: 40000,
+        maxIops: 40000,
+        baselineThroughputMbps: 1250,
+        maxThroughputMbps: 1250,
+        supportedEditions: ["Standard"],
+        minSqlMajorVersion: 14,
+        engine: "sqlserver-se",
+        engineVersion: "16.00.4125.3.v1",
+        sqlServerEdition: "Standard",
+        orderable: true
+      },
+      {
+        instanceClass: "db.m8i.4xlarge",
+        region: "us-east-1",
+        family: "m8i",
+        size: "4xlarge",
+        vcpu: 12,
+        sqlServerDefaultVcpuSource: "aws-processor-features",
+        memoryGb: 64,
+        baselineIops: 40000,
+        maxIops: 40000,
+        baselineThroughputMbps: 1250,
+        maxThroughputMbps: 1250,
+        supportedEditions: ["Standard"],
+        minSqlMajorVersion: 14,
+        engine: "sqlserver-se",
+        engineVersion: "16.00.4125.3.v1",
+        sqlServerEdition: "Standard",
+        orderable: true
+      }
+    ];
+
+    const result = optimizeComputeCandidate({
+      currentConfig: {
+        ...currentConfig,
+        instanceClass: "db.m5.4xlarge"
+      },
+      workload: workload(20),
+      catalog: sameSizeCatalog,
+      orderedCandidateInstanceClasses: ["db.m8i.4xlarge"],
+      currentVcpu: 16,
+      requirements: { memoryGb: 48, iops: 6000, throughputMbps: 200 }
+    });
+
+    assert.equal(result.recommendedConfig?.instanceClass, "db.m8i.4xlarge");
+    assert.equal(result.recommendedConfig?.sqlServerVisibleVcpu, 12);
+    assert.equal(result.optimizationEvidence?.projectedSqlCpuP95Pct, 26.67);
+  });
+
+  it("selects the smaller safe candidate when two candidates pass", () => {
+    const result = optimizeComputeCandidate({
+      currentConfig,
+      workload: workload(10),
+      catalog,
+      orderedCandidateInstanceClasses: ["db.r8i.4xlarge", "db.r8i.2xlarge"],
+      currentVcpu: 32,
+      requirements: { memoryGb: 48, iops: 6000, throughputMbps: 200 }
+    });
+
+    assert.equal(result.decision, "Recommended");
+    assert.equal(result.recommendedConfig?.instanceClass, "db.r8i.2xlarge");
+    assert.equal(result.recommendedConfig?.sqlServerVisibleVcpu, 8);
+    assert.equal(result.candidateEvaluations.filter((candidate) => candidate.accepted).length, 2);
+    assert.equal(result.candidateEvaluations.find((candidate) => candidate.instanceClass === "db.r8i.4xlarge")?.selected, false);
+  });
+
+  it("uses a fallback family only when the lead-family path fails a workload gate", () => {
+    const fallbackCatalog: InstanceCatalogEntry[] = [
+      {
+        ...catalog[0],
+        instanceClass: "db.m8i.2xlarge",
+        family: "m8i",
+        memoryGb: 32
+      },
+      {
+        ...catalog[1],
+        instanceClass: "db.r7i.2xlarge",
+        family: "r7i",
+        memoryGb: 64
+      }
+    ];
+
+    const result = optimizeComputeCandidate({
+      currentConfig,
+      workload: workload(15),
+      catalog: fallbackCatalog,
+      orderedCandidateInstanceClasses: ["db.m8i.2xlarge", "db.r7i.2xlarge"],
+      currentVcpu: 32,
+      requirements: { memoryGb: 48, iops: 6000, throughputMbps: 200 }
+    });
+
+    assert.equal(result.recommendedConfig?.instanceClass, "db.r7i.2xlarge");
+    assert.ok(result.candidateEvaluations.some((candidate) =>
+      candidate.instanceClass === "db.m8i.2xlarge"
+      && candidate.failedGates.includes("MEMORY_LESS_ELASTIC_FLOOR_UNDERFIT")
+    ));
+  });
+
+  it("prefers a lead family over an equivalent fallback survivor", () => {
+    const equivalentCatalog: InstanceCatalogEntry[] = [
+      {
+        ...catalog[1],
+        instanceClass: "db.r7i.2xlarge",
+        family: "r7i"
+      },
+      {
+        ...catalog[1],
+        instanceClass: "db.m8i.2xlarge",
+        family: "m8i"
+      }
+    ];
+
+    const result = optimizeComputeCandidate({
+      currentConfig,
+      workload: workload(15),
+      catalog: equivalentCatalog,
+      orderedCandidateInstanceClasses: ["db.r7i.2xlarge", "db.m8i.2xlarge"],
+      currentVcpu: 32,
+      requirements: { memoryGb: 48, iops: 6000, throughputMbps: 200 }
+    });
+
+    assert.equal(result.recommendedConfig?.instanceClass, "db.m8i.2xlarge");
+    assert.equal(result.candidateEvaluations.filter((candidate) => candidate.accepted).length, 2);
   });
 
   it("blocks production-safe recommendations when collection window is below 48 hours", () => {
@@ -528,7 +663,7 @@ describe("optimizeComputeCandidate", () => {
     const unadjusted = optimizeComputeCandidate({
       currentConfig,
       workload: workload(15),
-      catalog: [currentEntry, catalog[0]],
+      catalog: [currentEntry, { ...catalog[0], memoryGb: 256 }],
       orderedCandidateInstanceClasses: ["db.m8i.2xlarge"],
       currentVcpu: 32,
       requirements: { memoryGb: 16, iops: 6000, throughputMbps: 200 }
@@ -538,7 +673,7 @@ describe("optimizeComputeCandidate", () => {
       workload: workload(15),
       catalog: [
         { ...currentEntry, normalizedPerCoreCapacity: 1 },
-        { ...catalog[0], normalizedPerCoreCapacity: 1.2 }
+        { ...catalog[0], memoryGb: 256, normalizedPerCoreCapacity: 1.2 }
       ],
       orderedCandidateInstanceClasses: ["db.m8i.2xlarge"],
       currentVcpu: 32,
@@ -547,8 +682,10 @@ describe("optimizeComputeCandidate", () => {
 
     assert.equal(unadjusted.optimizationEvidence?.cpuProjectionConfidence, "low");
     assert.equal(unadjusted.optimizationEvidence?.cpuProjectionBasis, "unadjusted_cross_family");
+    assert.equal(unadjusted.decision, "Aggressive Optimization");
     assert.equal(normalized.optimizationEvidence?.cpuProjectionConfidence, "medium");
     assert.equal(normalized.optimizationEvidence?.cpuProjectionBasis, "normalized_cross_family");
+    assert.equal(normalized.decision, "Recommended");
     assert.equal(normalized.optimizationEvidence?.normalizedPerCoreCapacityFactor, 1.2);
     assert.equal(normalized.optimizationEvidence?.projectedSqlCpuP95Pct, 50);
   });
@@ -570,7 +707,7 @@ describe("optimizeComputeCandidate", () => {
     assert.ok(result.blockers.some((blocker) => blocker.code === "IOPS_P95_EFFECTIVE_CAPABILITY_EXCEEDED"));
   });
 
-  it("blocks an isolated IOPS maximum above effective capability", () => {
+  it("preserves an isolated IOPS maximum as evidence when P95 and P99 fit", () => {
     const result = optimizeComputeCandidate({
       currentConfig,
       workload: {
@@ -580,17 +717,75 @@ describe("optimizeComputeCandidate", () => {
           1000
         ])
       },
-      catalog: [{ ...catalog[1], baselineIops: 150, maxIops: 200, baselineThroughputMbps: 1250 }],
+      catalog: [{ ...catalog[1], baselineIops: 200, maxIops: 200, baselineThroughputMbps: 1250 }],
       orderedCandidateInstanceClasses: ["db.r8i.2xlarge"],
       currentVcpu: 32,
       requirements: { memoryGb: 48, iops: 109, throughputMbps: 200 }
     });
 
-    assert.equal(result.recommendedConfig, undefined);
+    assert.equal(result.recommendedConfig?.instanceClass, "db.r8i.2xlarge");
     assert.equal(result.optimizationEvidence?.iopsP95, 100);
     assert.equal(result.optimizationEvidence?.iopsP99, 109);
     assert.equal(result.optimizationEvidence?.iopsMax, 1000);
-    assert.ok(result.blockers.some((blocker) => blocker.code === "IOPS_HARD_MAXIMUM_EXCEEDED"));
+    assert.ok(!result.blockers.some((blocker) => blocker.code === "IOPS_HARD_MAXIMUM_EXCEEDED"));
+  });
+
+  it("uses an alternate Optimize CPU path when a smaller candidate fails IOPS", () => {
+    const rescueCatalog: InstanceCatalogEntry[] = [
+      {
+        instanceClass: "db.r8i.8xlarge",
+        region: "us-east-1",
+        family: "r8i",
+        size: "8xlarge",
+        vcpu: 32,
+        defaultCpuCores: 16,
+        defaultThreadsPerCore: 2,
+        sqlServerDefaultVcpuSource: "aws-processor-features",
+        optimizeCpuConfigurations: [
+          { coreCount: 8, threadsPerCore: 2, sqlServerVisibleVcpu: 16, isDefault: false },
+          { coreCount: 16, threadsPerCore: 2, sqlServerVisibleVcpu: 32, isDefault: true }
+        ],
+        memoryGb: 256,
+        baselineIops: 80000,
+        maxIops: 80000,
+        baselineThroughputMbps: 2000,
+        maxThroughputMbps: 2000,
+        supportedEditions: ["Enterprise", "Standard"],
+        minSqlMajorVersion: 14,
+        engine: "sqlserver-se",
+        engineVersion: "16.00.4125.3.v1",
+        sqlServerEdition: "Standard",
+        orderable: true
+      },
+      {
+        ...catalog[1],
+        baselineIops: 150,
+        maxIops: 250,
+        baselineThroughputMbps: 1250
+      }
+    ];
+    const result = optimizeComputeCandidate({
+      currentConfig,
+      workload: {
+        ...workload(15),
+        physicalIo: physicalIo(Array.from({ length: 100 }, () => 200))
+      },
+      catalog: rescueCatalog,
+      orderedCandidateInstanceClasses: ["db.r8i.2xlarge", "db.r8i.8xlarge"],
+      currentVcpu: 32,
+      requirements: { memoryGb: 48, iops: 200, throughputMbps: 200 }
+    });
+
+    assert.equal(result.recommendedConfig?.instanceClass, "db.r8i.8xlarge");
+    assert.equal(result.recommendedConfig?.cpuConfigurationType, "optimize_cpu");
+    assert.equal(result.recommendedConfig?.sqlServerVisibleVcpu, 16);
+    assert.equal(result.candidateEvaluations.find((candidate) =>
+      candidate.instanceClass === "db.r8i.2xlarge"
+    )?.failedGates.includes("IOPS_P95_EFFECTIVE_CAPABILITY_EXCEEDED"), true);
+    assert.equal(result.candidateEvaluations.find((candidate) =>
+      candidate.instanceClass === "db.r8i.8xlarge"
+      && candidate.cpuConfigurationType === "optimize_cpu"
+    )?.selected, true);
   });
 
   it("blocks throughput independently when physical P95 exceeds effective capability headroom", () => {
@@ -652,9 +847,9 @@ describe("optimizeComputeCandidate", () => {
         vcpu: 16,
         sqlServerDefaultVcpuSource: "aws-processor-features",
         memoryGb: 128,
-        baselineIops: 100,
+        baselineIops: 120,
         maxIops: 200,
-        baselineThroughputMbps: 10,
+        baselineThroughputMbps: 20,
         maxThroughputMbps: 20,
         supportedEditions: ["Standard"],
         minSqlMajorVersion: 14,

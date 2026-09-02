@@ -779,24 +779,33 @@ function lowerVcpuCandidates(currentInstanceClass: string, catalog: readonly Ins
 
   const seen = new Set<string>();
   const candidates: string[] = [];
+  const addCandidate = (instanceClass: string): void => {
+    if (seen.has(instanceClass)) return;
+    seen.add(instanceClass);
+    candidates.push(instanceClass);
+  };
   const currentHasLowerOptimizeCpu = catalog
     .filter((entry) => entry.instanceClass === currentInstanceClass)
     .some((entry) => (entry.optimizeCpuConfigurations ?? [])
       .some((configuration) => configuration.sqlServerVisibleVcpu < currentVcpu));
   if (currentHasLowerOptimizeCpu) {
-    seen.add(currentInstanceClass);
-    candidates.push(currentInstanceClass);
+    addCandidate(currentInstanceClass);
   }
 
-  candidates.push(...catalog
-    .filter((entry) => entry.vcpu < currentVcpu)
+  const lowerVisibleCpuEntries = catalog.filter((entry) =>
+    entry.instanceClass !== currentInstanceClass
+    && candidateCanReduceVisibleVcpu(entry, currentVcpu)
+  );
+  if (current?.size) {
+    lowerVisibleCpuEntries
+      .filter((entry) => entry.size === current.size)
+      .sort(compareSameSizeCandidateOrder)
+      .forEach((entry) => addCandidate(entry.instanceClass));
+  }
+  lowerVisibleCpuEntries
+    .filter((entry) => !current?.size || entry.size !== current.size)
     .sort(compareCandidateOrder)
-    .map((entry) => entry.instanceClass)
-    .filter((instanceClass) => {
-      if (seen.has(instanceClass)) return false;
-      seen.add(instanceClass);
-      return true;
-    }));
+    .forEach((entry) => addCandidate(entry.instanceClass));
   return candidates;
 }
 
@@ -805,6 +814,19 @@ function compareCandidateOrder(left: InstanceCatalogEntry, right: InstanceCatalo
     || preferredFamilyTier(left) - preferredFamilyTier(right)
     || right.memoryGb - left.memoryGb
     || left.instanceClass.localeCompare(right.instanceClass);
+}
+
+function compareSameSizeCandidateOrder(left: InstanceCatalogEntry, right: InstanceCatalogEntry): number {
+  return preferredFamilyTier(left) - preferredFamilyTier(right)
+    || left.family.localeCompare(right.family)
+    || left.instanceClass.localeCompare(right.instanceClass);
+}
+
+function candidateCanReduceVisibleVcpu(entry: InstanceCatalogEntry, currentVcpu: number): boolean {
+  return entry.vcpu < currentVcpu
+    || (entry.optimizeCpuConfigurations ?? []).some((configuration) =>
+      !configuration.isDefault && configuration.sqlServerVisibleVcpu < currentVcpu
+    );
 }
 
 function preferredFamilyTier(entry: InstanceCatalogEntry): number {

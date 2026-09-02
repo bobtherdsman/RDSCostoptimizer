@@ -223,6 +223,203 @@ describe("runCostHarness", () => {
     assertHarnessPassed(findings);
   });
 
+  it("fails when production skips a smaller safe candidate", () => {
+    const skippedCatalog: InstanceCatalogEntry[] = [
+      catalog[0],
+      {
+        ...catalog[0],
+        instanceClass: "db.r8i.2xlarge",
+        size: "2xlarge",
+        vcpu: 8,
+        memoryGb: 128
+      }
+    ];
+    const findings = runCostHarness({
+      result: validResult({
+        recommendedConfig: {
+          ...currentConfig,
+          instanceClass: "db.r8i.4xlarge",
+          sqlServerVisibleVcpu: 16,
+          cpuConfigurationType: "default"
+        },
+        candidateEvaluations: [
+          {
+            instanceClass: "db.r8i.4xlarge",
+            sqlServerVisibleVcpu: 16,
+            cpuConfigurationType: "default",
+            accepted: true,
+            selected: true,
+            decision: "Recommended",
+            passedGates: ["CPU", "MEMORY", "IOPS", "THROUGHPUT", "TEMPDB", "ORDERABILITY"],
+            failedGates: [],
+            limitingResources: [],
+            candidateMemoryGb: 128
+          },
+          {
+            instanceClass: "db.r8i.2xlarge",
+            sqlServerVisibleVcpu: 8,
+            cpuConfigurationType: "default",
+            accepted: true,
+            selected: false,
+            decision: "Recommended",
+            passedGates: ["CPU", "MEMORY", "IOPS", "THROUGHPUT", "TEMPDB", "ORDERABILITY"],
+            failedGates: [],
+            limitingResources: [],
+            candidateMemoryGb: 128
+          }
+        ]
+      }),
+      workload,
+      catalog: skippedCatalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) =>
+      !finding.passed
+      && finding.oracle === "CO-RULE-OPTIMAL-SAFE-CANDIDATE"
+      && finding.message.includes("db.r8i.2xlarge")
+    ));
+  });
+
+  it("fails when a fallback family is selected while an equal lead-family candidate is safe", () => {
+    const fallbackCatalog: InstanceCatalogEntry[] = [
+      catalog[0],
+      {
+        ...catalog[0],
+        instanceClass: "db.r7i.4xlarge",
+        family: "r7i"
+      }
+    ];
+    const findings = runCostHarness({
+      result: validResult({
+        recommendedConfig: {
+          ...currentConfig,
+          instanceClass: "db.r7i.4xlarge",
+          sqlServerVisibleVcpu: 16,
+          cpuConfigurationType: "default"
+        },
+        candidateEvaluations: [
+          {
+            instanceClass: "db.r7i.4xlarge",
+            sqlServerVisibleVcpu: 16,
+            cpuConfigurationType: "default",
+            accepted: true,
+            selected: true,
+            decision: "Recommended",
+            passedGates: ["CPU", "MEMORY", "IOPS", "THROUGHPUT", "TEMPDB", "ORDERABILITY"],
+            failedGates: [],
+            limitingResources: [],
+            candidateMemoryGb: 128
+          },
+          {
+            instanceClass: "db.r8i.4xlarge",
+            sqlServerVisibleVcpu: 16,
+            cpuConfigurationType: "default",
+            accepted: true,
+            selected: false,
+            decision: "Recommended",
+            passedGates: ["CPU", "MEMORY", "IOPS", "THROUGHPUT", "TEMPDB", "ORDERABILITY"],
+            failedGates: [],
+            limitingResources: [],
+            candidateMemoryGb: 128
+          }
+        ]
+      }),
+      workload,
+      catalog: fallbackCatalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) =>
+      !finding.passed
+      && finding.oracle === "CO-RULE-FALLBACK-FAMILY-JUSTIFIED"
+      && finding.message.includes("db.r8i.4xlarge")
+    ));
+  });
+
+  it("allows a fallback family when the equal lead-family candidate failed a real gate", () => {
+    const fallbackCatalog: InstanceCatalogEntry[] = [
+      catalog[0],
+      {
+        ...catalog[0],
+        instanceClass: "db.r7i.4xlarge",
+        family: "r7i"
+      }
+    ];
+    const findings = runCostHarness({
+      result: validResult({
+        recommendedConfig: {
+          ...currentConfig,
+          instanceClass: "db.r7i.4xlarge",
+          sqlServerVisibleVcpu: 16,
+          cpuConfigurationType: "default"
+        },
+        candidateEvaluations: [
+          {
+            instanceClass: "db.r7i.4xlarge",
+            sqlServerVisibleVcpu: 16,
+            cpuConfigurationType: "default",
+            accepted: true,
+            selected: true,
+            decision: "Recommended",
+            passedGates: ["CPU", "MEMORY", "IOPS", "THROUGHPUT", "TEMPDB", "ORDERABILITY"],
+            failedGates: [],
+            limitingResources: [],
+            candidateMemoryGb: 128
+          },
+          {
+            instanceClass: "db.r8i.4xlarge",
+            sqlServerVisibleVcpu: 16,
+            cpuConfigurationType: "default",
+            accepted: false,
+            selected: false,
+            decision: "Not Recommended",
+            passedGates: ["CPU", "IOPS", "THROUGHPUT", "TEMPDB", "ORDERABILITY"],
+            failedGates: ["MEMORY_LESS_ELASTIC_FLOOR_UNDERFIT"],
+            limitingResources: [{
+              dimension: "memory",
+              scope: "compute",
+              status: "blocking",
+              reason: "Candidate memory is below the preserved less-elastic floor.",
+              observed: 160,
+              limit: 128,
+              unit: "GB"
+            }],
+            candidateMemoryGb: 128
+          }
+        ]
+      }),
+      workload,
+      catalog: fallbackCatalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) =>
+      finding.passed && finding.oracle === "CO-RULE-FALLBACK-FAMILY-JUSTIFIED"
+    ));
+    assert.ok(findings.some((finding) =>
+      finding.passed && finding.oracle === "CO-RULE-OPTIMAL-SAFE-CANDIDATE"
+    ));
+  });
+
   it("independently rejects a recommendation backed only by generic catalog metadata", () => {
     const genericCatalog = catalog.map((entry) => ({
       ...entry,
@@ -324,6 +521,66 @@ describe("runCostHarness", () => {
     ));
   });
 
+  it("fails a hands-free result for unnormalized cross-family CPU projection", () => {
+    const crossFamilyCatalog: InstanceCatalogEntry[] = [
+      catalog[0],
+      {
+        ...catalog[0],
+        instanceClass: "db.m8i.4xlarge",
+        family: "m8i",
+        size: "4xlarge"
+      }
+    ];
+    const result = validResult({
+      recommendedConfig: {
+        ...currentConfig,
+        instanceClass: "db.m8i.4xlarge",
+        sqlServerVisibleVcpu: 16,
+        cpuConfigurationType: "default"
+      },
+      optimizationEvidence: {
+        ...validResult().optimizationEvidence!,
+        optimizedVcpu: 16,
+        cpuProjectionConfidence: "low",
+        cpuProjectionBasis: "unadjusted_cross_family",
+        normalizedPerCoreCapacityFactor: 1
+      },
+      candidateEvaluations: [
+        {
+          instanceClass: "db.m8i.4xlarge",
+          sqlServerVisibleVcpu: 16,
+          cpuConfigurationType: "default",
+          accepted: true,
+          selected: true,
+          decision: "Recommended",
+          passedGates: ["CPU", "MEMORY", "IOPS", "THROUGHPUT", "TEMPDB", "ORDERABILITY"],
+          failedGates: [],
+          limitingResources: [],
+          candidateMemoryGb: 128
+        }
+      ]
+    });
+    const findings = runCostHarness({
+      result,
+      workload,
+      catalog: crossFamilyCatalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) =>
+      !finding.passed && finding.oracle === "CO-I-CPU-FIT"
+    ));
+    assert.ok(findings.some((finding) =>
+      !finding.passed && finding.oracle === "CO-RULE-CPU"
+    ));
+  });
+
   it("validates physical IOPS P95, P99, and burst behavior from preserved evidence", () => {
     const burstCatalog: InstanceCatalogEntry[] = [
       {
@@ -367,6 +624,90 @@ describe("runCostHarness", () => {
     });
 
     assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-I-IOPS-FIT"));
+  });
+
+  it("allows physical IOPS P99 to use preserved burst capability", () => {
+    const burstCatalog: InstanceCatalogEntry[] = [
+      {
+        ...catalog[0],
+        baselineIops: 1000,
+        maxIops: 10000,
+        maximumIopsBurstDurationMinutes: 10,
+        maximumIopsBurstEventsPer24Hours: 4
+      }
+    ];
+    const result = validResult({
+      optimizationEvidence: {
+        ...validResult().optimizationEvidence!,
+        iopsP95: 600,
+        iopsP99: 7000,
+        iopsMax: 15000,
+        candidateBaselineIops: 1000,
+        candidateMaximumIops: 10000,
+        iopsBurstReliance: true,
+        iopsBurstEvidence: {
+          threshold: 700,
+          excursionSampleCount: 20,
+          excursionSamplePct: 2,
+          eventCount: 2,
+          longestEventMinutes: 5,
+          eventsPer24Hours: 2
+        }
+      }
+    });
+    const findings = runCostHarness({
+      result,
+      workload,
+      catalog: burstCatalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 600,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-I-IOPS-FIT"));
+    assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-RULE-IOPS"));
+  });
+
+  it("fails physical IOPS when P95 only fits burst capability", () => {
+    const burstCatalog: InstanceCatalogEntry[] = [
+      {
+        ...catalog[0],
+        baselineIops: 1000,
+        maxIops: 10000,
+        maximumIopsBurstDurationMinutes: 10,
+        maximumIopsBurstEventsPer24Hours: 4
+      }
+    ];
+    const result = validResult({
+      optimizationEvidence: {
+        ...validResult().optimizationEvidence!,
+        iopsP95: 800,
+        iopsP99: 850,
+        iopsMax: 1200,
+        candidateBaselineIops: 1000,
+        candidateMaximumIops: 10000,
+        iopsBurstReliance: false
+      }
+    });
+    const findings = runCostHarness({
+      result,
+      workload,
+      catalog: burstCatalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 800,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-I-IOPS-FIT"));
+    assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-RULE-IOPS"));
   });
 
   it("fails physical IOPS harness validation when burst duration exceeds capability", () => {
@@ -456,6 +797,90 @@ describe("runCostHarness", () => {
     });
 
     assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-I-THROUGHPUT-FIT"));
+  });
+
+  it("allows physical throughput P99 to use preserved burst capability", () => {
+    const throughputCatalog: InstanceCatalogEntry[] = [
+      {
+        ...catalog[0],
+        baselineThroughputMbps: 100,
+        maxThroughputMbps: 500,
+        maximumThroughputBurstDurationMinutes: 10,
+        maximumThroughputBurstEventsPer24Hours: 4
+      }
+    ];
+    const result = validResult({
+      optimizationEvidence: {
+        ...validResult().optimizationEvidence!,
+        throughputP95: 60,
+        throughputP99: 400,
+        throughputMax: 700,
+        candidateBaselineThroughputMbps: 100,
+        candidateMaximumThroughputMbps: 500,
+        throughputBurstReliance: true,
+        throughputBurstEvidence: {
+          threshold: 70,
+          excursionSampleCount: 20,
+          excursionSamplePct: 2,
+          eventCount: 2,
+          longestEventMinutes: 5,
+          eventsPer24Hours: 2
+        }
+      }
+    });
+    const findings = runCostHarness({
+      result,
+      workload,
+      catalog: throughputCatalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 60
+      }
+    });
+
+    assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-I-THROUGHPUT-FIT"));
+    assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-RULE-THROUGHPUT"));
+  });
+
+  it("fails physical throughput when P95 only fits burst capability", () => {
+    const throughputCatalog: InstanceCatalogEntry[] = [
+      {
+        ...catalog[0],
+        baselineThroughputMbps: 100,
+        maxThroughputMbps: 500,
+        maximumThroughputBurstDurationMinutes: 10,
+        maximumThroughputBurstEventsPer24Hours: 4
+      }
+    ];
+    const result = validResult({
+      optimizationEvidence: {
+        ...validResult().optimizationEvidence!,
+        throughputP95: 80,
+        throughputP99: 90,
+        throughputMax: 120,
+        candidateBaselineThroughputMbps: 100,
+        candidateMaximumThroughputMbps: 500,
+        throughputBurstReliance: false
+      }
+    });
+    const findings = runCostHarness({
+      result,
+      workload,
+      catalog: throughputCatalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 80
+      }
+    });
+
+    assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-I-THROUGHPUT-FIT"));
+    assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-RULE-THROUGHPUT"));
   });
 
   it("accepts blocked results only when blockers are explained", () => {

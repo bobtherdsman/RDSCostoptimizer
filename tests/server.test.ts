@@ -386,6 +386,136 @@ describe("manual upload Express assembly", () => {
     assert.equal(analyzed.reports[0].recommendedConfig?.instanceClass, "db.r8i.2xlarge");
   });
 
+  it("generates same-size lead-family candidates before smaller sizes", async () => {
+    const sameSizeCatalog: InstanceCatalogEntry[] = [
+      {
+        instanceClass: "db.m5.4xlarge",
+        region: "us-east-1",
+        family: "m5",
+        size: "4xlarge",
+        vcpu: 16,
+        sqlServerDefaultVcpuSource: "aws-processor-features",
+        memoryGb: 64,
+        baselineIops: 40000,
+        maxIops: 40000,
+        baselineThroughputMbps: 1250,
+        maxThroughputMbps: 1250,
+        supportedEditions: ["Standard"],
+        minSqlMajorVersion: 14,
+        engine: "sqlserver-se",
+        engineVersion: "16.00.4125.3.v1",
+        sqlServerEdition: "Standard",
+        orderable: true
+      },
+      {
+        instanceClass: "db.m8i.4xlarge",
+        region: "us-east-1",
+        family: "m8i",
+        size: "4xlarge",
+        vcpu: 12,
+        sqlServerDefaultVcpuSource: "aws-processor-features",
+        memoryGb: 64,
+        baselineIops: 40000,
+        maxIops: 40000,
+        baselineThroughputMbps: 1250,
+        maxThroughputMbps: 1250,
+        supportedEditions: ["Standard"],
+        minSqlMajorVersion: 14,
+        engine: "sqlserver-se",
+        engineVersion: "16.00.4125.3.v1",
+        sqlServerEdition: "Standard",
+        orderable: true
+      },
+      catalog[0]
+    ];
+    const manifest = [
+      "ServerName,RDSSize,StorageType,ProvisionedIops,ProvisionedThroughputMbps,AllocatedStorageGb,MultiAz",
+      "prod-sql-01.abc123.us-east-1.rds.amazonaws.com,db.m5.4xlarge,gp3,12000,500,512,false"
+    ].join("\n");
+
+    const built = await buildManualUploadRequestFromMultipart({
+      ownerEmail: "owner@example.com",
+      requesterEmail: "owner@example.com",
+      collectorPackages: [{ originalname: "collector.zip", buffer: collectorZipWithManifest(manifest) }],
+      catalog: sameSizeCatalog
+    });
+
+    assert.equal(built.ok, true, JSON.stringify(built));
+    if (!built.ok) return;
+    assert.deepEqual(built.request.uploads[0].orderedCandidateInstanceClasses, [
+      "db.m8i.4xlarge",
+      "db.r8i.2xlarge"
+    ]);
+  });
+
+  it("generates same-size Optimize CPU rescue candidates before smaller I/O paths", async () => {
+    const optimizeCpuCatalog: InstanceCatalogEntry[] = [
+      {
+        instanceClass: "db.m5.4xlarge",
+        region: "us-east-1",
+        family: "m5",
+        size: "4xlarge",
+        vcpu: 16,
+        sqlServerDefaultVcpuSource: "aws-processor-features",
+        memoryGb: 64,
+        baselineIops: 40000,
+        maxIops: 40000,
+        baselineThroughputMbps: 1250,
+        maxThroughputMbps: 1250,
+        supportedEditions: ["Standard"],
+        minSqlMajorVersion: 14,
+        engine: "sqlserver-se",
+        engineVersion: "16.00.4125.3.v1",
+        sqlServerEdition: "Standard",
+        orderable: true
+      },
+      {
+        instanceClass: "db.r8i.4xlarge",
+        region: "us-east-1",
+        family: "r8i",
+        size: "4xlarge",
+        vcpu: 16,
+        defaultCpuCores: 8,
+        defaultThreadsPerCore: 2,
+        sqlServerDefaultVcpuSource: "aws-processor-features",
+        optimizeCpuConfigurations: [
+          { coreCount: 4, threadsPerCore: 2, sqlServerVisibleVcpu: 8, isDefault: false },
+          { coreCount: 8, threadsPerCore: 2, sqlServerVisibleVcpu: 16, isDefault: true }
+        ],
+        memoryGb: 128,
+        baselineIops: 80000,
+        maxIops: 80000,
+        baselineThroughputMbps: 2000,
+        maxThroughputMbps: 2000,
+        supportedEditions: ["Standard"],
+        minSqlMajorVersion: 14,
+        engine: "sqlserver-se",
+        engineVersion: "16.00.4125.3.v1",
+        sqlServerEdition: "Standard",
+        orderable: true
+      },
+      catalog[0]
+    ];
+    const manifest = [
+      "ServerName,RDSSize,StorageType,ProvisionedIops,ProvisionedThroughputMbps,AllocatedStorageGb,MultiAz",
+      "prod-sql-01.abc123.us-east-1.rds.amazonaws.com,db.m5.4xlarge,gp3,12000,500,512,false"
+    ].join("\n");
+
+    const built = await buildManualUploadRequestFromMultipart({
+      ownerEmail: "owner@example.com",
+      requesterEmail: "owner@example.com",
+      collectorPackages: [{ originalname: "collector.zip", buffer: collectorZipWithManifest(manifest) }],
+      catalog: optimizeCpuCatalog
+    });
+
+    assert.equal(built.ok, true, JSON.stringify(built));
+    if (!built.ok) return;
+    assert.deepEqual(built.request.uploads[0].orderedCandidateInstanceClasses, [
+      "db.r8i.4xlarge",
+      "db.r8i.2xlarge"
+    ]);
+  });
+
   it("does not request inline exports by default for browser uploads", async () => {
     const built = await buildManualUploadRequestFromMultipart({
       ownerEmail: "owner@example.com",

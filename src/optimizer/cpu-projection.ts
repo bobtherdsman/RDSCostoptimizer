@@ -237,12 +237,9 @@ export function evaluateCpuCandidates(
       valid: failures.length === 0
     };
     evaluations.push(evaluation);
-    if (evaluation.valid && memoryPreferenceRank(evaluation) === 0) break;
   }
 
-  return evaluations.sort((left, right) =>
-    memoryPreferenceRank(left) - memoryPreferenceRank(right)
-  );
+  return evaluations;
 }
 
 function cached<T>(cache: Map<string, T>, key: string, build: () => T): T {
@@ -506,12 +503,6 @@ function cpuComparison(
 
 function familyFromInstanceClass(instanceClass: string): string {
   return instanceClass.split(".")[1] ?? "unknown";
-}
-
-function memoryPreferenceRank(evaluation: CpuCandidateEvaluation): number {
-  if (evaluation.memoryCoupling?.verdict === "not_required") return 0;
-  if (evaluation.memoryCoupling?.verdict === "stable_working_set") return 1;
-  return 2;
 }
 
 function round(value: number): number {

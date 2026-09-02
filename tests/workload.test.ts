@@ -112,6 +112,30 @@ describe("analyzeServerWorkload", () => {
     assert.equal("storageRecommendation" in result, false);
   });
 
+  it("keeps pricing unavailable from blocking a technical optimization result", () => {
+    const result = analyzeServerWorkload({
+      serverName: "pricing-deferred-sql",
+      currentConfig,
+      workload: workload(10),
+      currentVcpu: 32,
+      orderedCandidateInstanceClasses: ["db.r8i.4xlarge"],
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    }, catalog);
+    const serializedReport = JSON.stringify(result.report);
+
+    assert.equal(result.computeResult.recommendedConfig?.instanceClass, "db.r8i.4xlarge");
+    assert.notEqual(result.workloadResult.decision, "Not Recommended");
+    assert.equal(result.report.pricingDeferred, true);
+    assert.match(result.report.pricingNote, /Pricing is deferred/);
+    assert.equal("monthlySavings" in result.report, false);
+    assert.equal("annualSavings" in result.report, false);
+    assert.equal(/monthly savings|annual savings/i.test(serializedReport), false);
+  });
+
   it("fails closed when current storage provisioning facts are missing", () => {
     const result = analyzeServerWorkload({
       serverName: "prod-sql-01",

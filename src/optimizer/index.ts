@@ -81,7 +81,7 @@ export function optimizeComputeCandidate(input: ComputeOptimizationInput): Optim
   }
 
   const evaluations = evaluateCpuCandidates(input);
-  const selected = evaluations.find((evaluation) => evaluation.valid);
+  const selected = selectBestSafeSurvivor(evaluations);
   if (selected?.candidate.entry && selected.projection) {
     const enterpriseCandidateConfig: CurrentRdsConfig = {
       ...input.currentConfig,
@@ -417,9 +417,70 @@ function blockedResult(
 
 function decisionForEvaluation(evaluation: CpuCandidateEvaluation): OptimizationDecision {
   if (!evaluation.valid) return "Not Recommended";
-  return evaluation.memoryCoupling?.verdict === "aggressive_medium_confidence"
+  return validationRequiredForEvaluation(evaluation)
     ? "Aggressive Optimization"
     : "Recommended";
+}
+
+function validationRequiredForEvaluation(evaluation: CpuCandidateEvaluation): boolean {
+  return evaluation.memoryCoupling?.verdict === "aggressive_medium_confidence"
+    || evaluation.projection?.basis === "unadjusted_cross_family";
+}
+
+function selectBestSafeSurvivor(evaluations: readonly CpuCandidateEvaluation[]): CpuCandidateEvaluation | undefined {
+  return evaluations
+    .filter((evaluation) => evaluation.valid)
+    .sort(compareSafeSurvivors)[0];
+}
+
+function compareSafeSurvivors(left: CpuCandidateEvaluation, right: CpuCandidateEvaluation): number {
+  return left.candidate.sqlServerVisibleVcpu - right.candidate.sqlServerVisibleVcpu
+    || preferredFamilyTier(left) - preferredFamilyTier(right)
+    || evaluationRiskRank(left) - evaluationRiskRank(right)
+    || projectionConfidenceRank(left) - projectionConfidenceRank(right)
+    || memoryPreservationRank(left) - memoryPreservationRank(right)
+    || configurationTypeRank(left) - configurationTypeRank(right)
+    || left.candidate.instanceClass.localeCompare(right.candidate.instanceClass);
+}
+
+function preferredFamilyTier(evaluation: CpuCandidateEvaluation): number {
+  const family = evaluation.candidate.entry?.family ?? familyFromInstanceClass(evaluation.candidate.instanceClass);
+  if (["m8i", "r8i", "x2m"].includes(family)) return 0;
+  if (["m7i", "r7i", "x2iedn"].includes(family)) return 1;
+  return 2;
+}
+
+function evaluationRiskRank(evaluation: CpuCandidateEvaluation): number {
+  if (!evaluation.projection) return 3;
+  return riskFromVerifiedSignals(
+    evaluation.projection,
+    evaluation.memory,
+    evaluation.memoryCoupling,
+    evaluation.iops,
+    evaluation.throughput,
+    evaluation.tempdb
+  ) === "low" ? 0 : 1;
+}
+
+function projectionConfidenceRank(evaluation: CpuCandidateEvaluation): number {
+  if (evaluation.projection?.confidence === "high") return 0;
+  if (evaluation.projection?.confidence === "medium") return 1;
+  return 2;
+}
+
+function memoryPreservationRank(evaluation: CpuCandidateEvaluation): number {
+  if ((evaluation.memory?.memoryReductionPct ?? 0) <= 0) return 0;
+  if (evaluation.memoryCoupling?.verdict === "not_required") return 1;
+  if (evaluation.memoryCoupling?.verdict === "stable_working_set") return 2;
+  return 3;
+}
+
+function configurationTypeRank(evaluation: CpuCandidateEvaluation): number {
+  return evaluation.candidate.configurationType === "optimize_cpu" ? 0 : 1;
+}
+
+function familyFromInstanceClass(instanceClass: string): string {
+  return instanceClass.split(".")[1] ?? "unknown";
 }
 
 function candidateEvaluationRecord(

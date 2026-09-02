@@ -293,19 +293,26 @@ export function evaluateCandidateThroughput(input: {
   const p95 = physicalIo.totalMibPerSec.p95;
   const p99 = physicalIo.totalMibPerSec.p99;
   const maximum = physicalIo.totalMibPerSec.max;
-  const effectiveCapability = effectiveCapabilityLimit(
+  const effectiveSustainedCapability = effectiveCapabilityLimit(
+    input.baselineThroughputMbps,
+    input.configuredStorageThroughputMbps
+  );
+  const effectiveBurstCapability = effectiveCapabilityLimit(
     input.maximumThroughputMbps,
     input.configuredStorageThroughputMbps
   );
-  const p95Limit = effectiveCapability !== undefined
-    ? effectiveCapability * NORMAL_IO_HEADROOM_TARGET
+  const p95Limit = effectiveSustainedCapability !== undefined
+    ? effectiveSustainedCapability * NORMAL_IO_HEADROOM_TARGET
     : undefined;
-  const p99Limit = effectiveCapability !== undefined
-    ? effectiveCapability * BURST_IO_SAFETY_LIMIT
+  const p99Limit = effectiveBurstCapability !== undefined
+    ? effectiveBurstCapability * BURST_IO_SAFETY_LIMIT
     : undefined;
 
   if (physicalIo.samples.length === 0) {
     failures.push("THROUGHPUT_SAMPLE_SERIES_UNAVAILABLE: cumulative file byte counters produced no complete valid intervals");
+  }
+  if (input.baselineThroughputMbps === undefined || input.baselineThroughputMbps <= 0) {
+    failures.push("THROUGHPUT_BASELINE_CAPABILITY_UNKNOWN: candidate sustained throughput capability is unavailable");
   }
   if (input.maximumThroughputMbps <= 0) {
     failures.push("THROUGHPUT_MAXIMUM_CAPABILITY_UNKNOWN: candidate maximum throughput capability is unavailable");
@@ -318,9 +325,6 @@ export function evaluateCandidateThroughput(input: {
   }
   if (p99Limit !== undefined && p99 > p99Limit) {
     failures.push(`THROUGHPUT_P99_EFFECTIVE_CAPABILITY_EXCEEDED: ${p99} > ${round2(p99Limit)}`);
-  }
-  if (effectiveCapability !== undefined && maximum > effectiveCapability) {
-    failures.push(`THROUGHPUT_HARD_MAXIMUM_EXCEEDED: ${maximum} > ${effectiveCapability}`);
   }
 
   const burstReliance =
@@ -392,19 +396,26 @@ export function evaluateCandidateIops(input: {
   const p95 = physicalIo.totalIops.p95;
   const p99 = physicalIo.totalIops.p99;
   const maximum = physicalIo.totalIops.max;
-  const effectiveCapability = effectiveCapabilityLimit(
+  const effectiveSustainedCapability = effectiveCapabilityLimit(
+    input.baselineIops,
+    input.configuredStorageIops
+  );
+  const effectiveBurstCapability = effectiveCapabilityLimit(
     input.maximumIops,
     input.configuredStorageIops
   );
-  const p95Limit = effectiveCapability !== undefined
-    ? effectiveCapability * NORMAL_IO_HEADROOM_TARGET
+  const p95Limit = effectiveSustainedCapability !== undefined
+    ? effectiveSustainedCapability * NORMAL_IO_HEADROOM_TARGET
     : undefined;
-  const p99Limit = effectiveCapability !== undefined
-    ? effectiveCapability * BURST_IO_SAFETY_LIMIT
+  const p99Limit = effectiveBurstCapability !== undefined
+    ? effectiveBurstCapability * BURST_IO_SAFETY_LIMIT
     : undefined;
 
   if (physicalIo.samples.length === 0) {
     failures.push("IOPS_SAMPLE_SERIES_UNAVAILABLE: cumulative file counters produced no complete valid intervals");
+  }
+  if (input.baselineIops === undefined || input.baselineIops <= 0) {
+    failures.push("IOPS_BASELINE_CAPABILITY_UNKNOWN: candidate sustained IOPS capability is unavailable");
   }
   if (input.maximumIops <= 0) {
     failures.push("IOPS_MAXIMUM_CAPABILITY_UNKNOWN: candidate maximum IOPS capability is unavailable");
@@ -417,9 +428,6 @@ export function evaluateCandidateIops(input: {
   }
   if (p99Limit !== undefined && p99 > p99Limit) {
     failures.push(`IOPS_P99_EFFECTIVE_CAPABILITY_EXCEEDED: ${p99} > ${round2(p99Limit)}`);
-  }
-  if (effectiveCapability !== undefined && maximum > effectiveCapability) {
-    failures.push(`IOPS_HARD_MAXIMUM_EXCEEDED: ${maximum} > ${effectiveCapability}`);
   }
 
   const burstReliance =

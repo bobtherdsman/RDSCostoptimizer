@@ -219,6 +219,23 @@ describe("physical IOPS calculation", () => {
   });
 
   it("fails P95 and P99 above effective capability headroom", () => {
+    const sustainedUsesBaseline = evaluateCandidateIops({
+      workload: workloadWithPhysical(Array.from({ length: 100 }, () => 120)),
+      baselineIops: 150,
+      maximumIops: 1000,
+      configuredStorageIops: 1000
+    });
+    const burstUsesMaximum = evaluateCandidateIops({
+      workload: workloadWithPhysical([
+        ...Array.from({ length: 96 }, () => 100),
+        ...Array.from({ length: 4 }, () => 800)
+      ]),
+      baselineIops: 150,
+      maximumIops: 1000,
+      configuredStorageIops: 1000,
+      maximumBurstDurationMinutes: 5,
+      maximumBurstEventsPer24Hours: 20
+    });
     const sustainedFailure = evaluateCandidateIops({
       workload: workloadWithPhysical(Array.from({ length: 100 }, () => 200)),
       baselineIops: 150,
@@ -235,6 +252,9 @@ describe("physical IOPS calculation", () => {
       configuredStorageIops: 250
     });
 
+    assert.ok(sustainedUsesBaseline.failures.some((failure) => failure.startsWith("IOPS_P95_EFFECTIVE_CAPABILITY_EXCEEDED")));
+    assert.equal(burstUsesMaximum.valid, true);
+    assert.equal(burstUsesMaximum.burstReliance, true);
     assert.ok(sustainedFailure.failures.some((failure) => failure.startsWith("IOPS_P95_EFFECTIVE_CAPABILITY_EXCEEDED")));
     assert.ok(burstFailure.failures.some((failure) => failure.startsWith("IOPS_P99_EFFECTIVE_CAPABILITY_EXCEEDED")));
   });
@@ -283,24 +303,44 @@ describe("physical IOPS calculation", () => {
     assert.ok(frequencyFailure.failures.some((failure) => failure.startsWith("IOPS_BURST_FREQUENCY_EXCEEDED")));
   });
 
-  it("fails an isolated maximum above effective capability", () => {
+  it("treats an isolated raw IOPS maximum above capability as context", () => {
     const evaluation = evaluateCandidateIops({
       workload: workloadWithPhysical([
         ...Array.from({ length: 99 }, () => 100),
         1000
       ]),
-      baselineIops: 150,
+      baselineIops: 200,
       maximumIops: 200,
       configuredStorageIops: 200
     });
 
-    assert.equal(evaluation.valid, false);
+    assert.equal(evaluation.valid, true);
     assert.equal(evaluation.p99, 109);
     assert.equal(evaluation.max, 1000);
-    assert.ok(evaluation.failures.some((failure) => failure.startsWith("IOPS_HARD_MAXIMUM_EXCEEDED")));
+    assert.deepEqual(evaluation.failures, []);
   });
 
   it("validates throughput P95 and P99 independently from IOPS", () => {
+    const sustainedUsesBaseline = evaluateCandidateThroughput({
+      workload: workloadWithPhysical(
+        Array.from({ length: 100 }, () => 10),
+        Array.from({ length: 100 }, () => 120)
+      ),
+      baselineThroughputMbps: 150,
+      maximumThroughputMbps: 1000,
+      configuredStorageThroughputMbps: 1000
+    });
+    const burstUsesMaximum = evaluateCandidateThroughput({
+      workload: workloadWithPhysical(
+        Array.from({ length: 100 }, () => 10),
+        [...Array.from({ length: 96 }, () => 100), ...Array.from({ length: 4 }, () => 800)]
+      ),
+      baselineThroughputMbps: 150,
+      maximumThroughputMbps: 1000,
+      configuredStorageThroughputMbps: 1000,
+      maximumBurstDurationMinutes: 5,
+      maximumBurstEventsPer24Hours: 20
+    });
     const sustainedFailure = evaluateCandidateThroughput({
       workload: workloadWithPhysical(
         Array.from({ length: 100 }, () => 10),
@@ -320,6 +360,9 @@ describe("physical IOPS calculation", () => {
       configuredStorageThroughputMbps: 250
     });
 
+    assert.ok(sustainedUsesBaseline.failures.some((failure) => failure.startsWith("THROUGHPUT_P95_EFFECTIVE_CAPABILITY_EXCEEDED")));
+    assert.equal(burstUsesMaximum.valid, true);
+    assert.equal(burstUsesMaximum.burstReliance, true);
     assert.ok(sustainedFailure.failures.some((failure) => failure.startsWith("THROUGHPUT_P95_EFFECTIVE_CAPABILITY_EXCEEDED")));
     assert.ok(burstFailure.failures.some((failure) => failure.startsWith("THROUGHPUT_P99_EFFECTIVE_CAPABILITY_EXCEEDED")));
   });
@@ -345,17 +388,17 @@ describe("physical IOPS calculation", () => {
         Array.from({ length: 100 }, () => 10),
         [...Array.from({ length: 99 }, () => 100), 1000]
       ),
-      baselineThroughputMbps: 150,
+      baselineThroughputMbps: 200,
       maximumThroughputMbps: 200,
       configuredStorageThroughputMbps: 200
     });
 
     assert.ok(unknown.failures.some((failure) => failure.startsWith("THROUGHPUT_BURST_BEHAVIOR_UNKNOWN")));
     assert.equal(validBurst.valid, true);
-    assert.equal(isolatedMaximum.valid, false);
+    assert.equal(isolatedMaximum.valid, true);
     assert.equal(isolatedMaximum.p99, 109);
     assert.equal(isolatedMaximum.max, 1000);
-    assert.ok(isolatedMaximum.failures.some((failure) => failure.startsWith("THROUGHPUT_HARD_MAXIMUM_EXCEEDED")));
+    assert.deepEqual(isolatedMaximum.failures, []);
   });
 
   it("remaps all four candidate-aware tempdb placement transitions before percentiles", () => {
