@@ -10,7 +10,7 @@ import type {
   OptimizationResult,
   WorkloadProfile
 } from "../contracts/types.js";
-import type { InstanceCatalogEntry } from "../catalog/index.js";
+import { familyPreferenceForFamily, familyPreferenceRankForEntry, type InstanceCatalogEntry } from "../catalog/index.js";
 import { assessEvidenceWindowFromDuration } from "../evidence-window/index.js";
 import {
   CPU_P99_SAFETY_LIMIT_PCT,
@@ -435,7 +435,7 @@ function selectBestSafeSurvivor(evaluations: readonly CpuCandidateEvaluation[]):
 
 function compareSafeSurvivors(left: CpuCandidateEvaluation, right: CpuCandidateEvaluation): number {
   return left.candidate.sqlServerVisibleVcpu - right.candidate.sqlServerVisibleVcpu
-    || preferredFamilyTier(left) - preferredFamilyTier(right)
+    || familyPreferenceRank(left) - familyPreferenceRank(right)
     || evaluationRiskRank(left) - evaluationRiskRank(right)
     || projectionConfidenceRank(left) - projectionConfidenceRank(right)
     || memoryPreservationRank(left) - memoryPreservationRank(right)
@@ -443,11 +443,9 @@ function compareSafeSurvivors(left: CpuCandidateEvaluation, right: CpuCandidateE
     || left.candidate.instanceClass.localeCompare(right.candidate.instanceClass);
 }
 
-function preferredFamilyTier(evaluation: CpuCandidateEvaluation): number {
-  const family = evaluation.candidate.entry?.family ?? familyFromInstanceClass(evaluation.candidate.instanceClass);
-  if (["m8i", "r8i", "x2m"].includes(family)) return 0;
-  if (["m7i", "r7i", "x2iedn"].includes(family)) return 1;
-  return 2;
+function familyPreferenceRank(evaluation: CpuCandidateEvaluation): number {
+  if (evaluation.candidate.entry) return familyPreferenceRankForEntry(evaluation.candidate.entry);
+  return familyPreferenceForFamily(familyFromInstanceClass(evaluation.candidate.instanceClass)).rank;
 }
 
 function evaluationRiskRank(evaluation: CpuCandidateEvaluation): number {

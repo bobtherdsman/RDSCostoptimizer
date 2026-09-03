@@ -1,0 +1,63 @@
+name: Catalog Refresh
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    name: Refresh RDS SQL Server catalog
+    runs-on: ubuntu-latest
+    env:
+      CATALOG_REFRESH_ROLE_ARN: ${{ secrets.CATALOG_REFRESH_ROLE_ARN }}
+      AWS_REGION: us-east-1
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure AWS credentials
+        if: ${{ env.CATALOG_REFRESH_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.CATALOG_REFRESH_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Preserve committed catalog
+        run: |
+          mkdir -p .catalog-refresh
+          cp src/catalog/data/rds-sqlserver-orderable.json .catalog-refresh/before.json
+
+      - name: Refresh approved Regions
+        run: npm run catalog:refresh:approved
+
+      - name: Generate refresh summary
+        run: |
+          npm run catalog:refresh:summary -- --before .catalog-refresh/before.json --after src/catalog/data/rds-sqlserver-orderable.json --output .catalog-refresh/summary.md
+          cat .catalog-refresh/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run full verification
+        run: npm test
+
+      - name: Create review pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: codex/catalog-refresh
+          delete-branch: true
+          title: "Refresh RDS SQL Server catalog"
+          commit-message: "Refresh RDS SQL Server catalog"
+          body-path: .catalog-refresh/summary.md
+          add-paths: |
+            src/catalog/data/rds-sqlserver-orderable.json

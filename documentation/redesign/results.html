@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workload Results — RDS SQL Server Cost Optimization</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="header app">
+  <div class="nav">
+    <a class="brand" href="overview.html"><span class="mark">RDS</span><span>Cost Optimization<small>Workload results</small></span></a>
+    <nav class="menu" aria-label="Primary">
+      <a href="overview.html">Overview</a>
+      <a href="services.html">Services</a>
+      <a href="assessment.html">Assessment</a>
+      <a href="results.html" aria-current="page">Results</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap app">
+  <section class="hero app" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px">
+    <div>
+      <p class="kicker">Workload results</p>
+      <h1>Fleet optimization decision</h1>
+      <p class="muted">Pricing is not included in this phase. Export the full evidence package below.</p>
+    </div>
+    <div class="actions">
+      <a class="btn ghost" href="#">Export PDF</a>
+      <a class="btn ghost" href="#">CSV</a>
+      <a class="btn ghost" href="#">JSON</a>
+    </div>
+  </section>
+
+  <section class="kpis" aria-label="Fleet summary">
+    <div class="kpi total"><span>Total servers</span><strong>3</strong></div>
+    <div class="kpi ok"><span>Recommended</span><strong>1</strong></div>
+    <div class="kpi warn"><span>Aggressive</span><strong>1</strong></div>
+    <div class="kpi"><span>Stay as is</span><strong>1</strong></div>
+  </section>
+
+  <section aria-label="Per-server results">
+    <details class="server" open>
+      <summary>
+        <span class="title">orders-prod-01</span>
+        <span class="move">db.r8i.16xlarge → db.r8i.12xlarge</span>
+        <span class="chip ok">Recommended</span>
+      </summary>
+      <div class="body">
+        <p class="muted" style="margin:0">Current CPU is underutilized and memory, IOPS, and throughput all fit the smaller instance. Confidence: medium (7-day window).</p>
+        <div class="evgrid">
+          <div class="ev"><span>CPU p95</span><strong>18%</strong></div>
+          <div class="ev"><span>Memory floor</span><strong>232 GB</strong></div>
+          <div class="ev"><span>IOPS p95</span><strong>11,000</strong></div>
+          <div class="ev"><span>Throughput p95</span><strong>270 MiB/s</strong></div>
+          <div class="ev"><span>Top driver</span><strong>orders</strong></div>
+          <div class="ev"><span>Evidence</span><strong>7d complete</strong></div>
+        </div>
+      </div>
+    </details>
+
+    <details class="server">
+      <summary>
+        <span class="title">analytics-prod-02</span>
+        <span class="move">db.r6i.16xlarge → db.x2m.8xlarge</span>
+        <span class="chip warn">Aggressive</span>
+      </summary>
+      <div class="body">
+        <p class="muted" style="margin:0">Low sustained demand allows a cross-family move to a smaller memory-optimized class. Review before applying.</p>
+        <div class="evgrid">
+          <div class="ev"><span>CPU p95</span><strong>12%</strong></div>
+          <div class="ev"><span>IOPS p95</span><strong>4,200</strong></div>
+          <div class="ev"><span>Top driver</span><strong>orders</strong></div>
+          <div class="ev"><span>Evidence</span><strong>14d complete</strong></div>
+        </div>
+      </div>
+    </details>
+
+    <details class="server">
+      <summary>
+        <span class="title">txn-prod-03</span>
+        <span class="move">Keep db.r8i.16xlarge</span>
+        <span class="chip stay">Stay as is</span>
+      </summary>
+      <div class="body">
+        <p class="muted" style="margin:0">Observed physical IOPS demand does not fit any lower candidate.</p>
+        <div class="evgrid">
+          <div class="ev"><span>IOPS p95</span><strong>50,000</strong></div>
+          <div class="ev"><span>Blocker</span><strong>IOPS ceiling</strong></div>
+          <div class="ev"><span>Top driver</span><strong>orders</strong></div>
+          <div class="ev"><span>Evidence</span><strong>7d complete</strong></div>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <section class="panel" style="margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
+    <div><strong>Download result package</strong><p class="muted" style="margin:.3em 0 0;font-size:13px">PDF is business-oriented. CSV and JSON preserve technical detail. Pricing is not included.</p></div>
+    <div class="actions"><a class="btn primary" href="#">Download PDF</a><a class="btn ghost" href="#">CSV</a><a class="btn ghost" href="#">JSON</a></div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="inner">
+    <div><strong>RDS SQL Server Cost Optimization</strong><p class="muted" style="margin:.4em 0 0;max-width:34ch">Evidence-led workload-fit decisions.</p></div>
+    <div><strong>Legend</strong><ul><li><span class="chip ok">Recommended</span> safe downsize</li><li><span class="chip warn">Aggressive</span> review before applying</li><li><span class="chip stay">Stay as is</span> keep current</li></ul></div>
+  </div>
+</footer>
+</body>
+</html>

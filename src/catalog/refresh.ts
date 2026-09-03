@@ -8,6 +8,7 @@ import {
   type LocalInstanceStorageSource,
   type RdsOrderableDbInstanceOption
 } from "./index.js";
+import { loadApprovedCatalogRegions } from "./approved-regions.js";
 
 interface RefreshArguments {
   regions: string[];
@@ -30,7 +31,10 @@ export function refreshRdsSqlServerCatalog(args: RefreshArguments): number {
   }
 
   mkdirSync(dirname(args.outputPath), { recursive: true });
-  writeFileSync(args.outputPath, `${JSON.stringify(catalog, null, 2)}\n`, "utf8");
+  const outputCatalog = existsSync(args.outputPath)
+    ? preserveUnchangedCatalogTimestamps(catalog, JSON.parse(readFileSync(args.outputPath, "utf8")) as ReturnType<typeof instanceCatalogFromOrderableOptions>)
+    : catalog;
+  writeFileSync(args.outputPath, `${JSON.stringify(outputCatalog, null, 2)}\n`, "utf8");
   return catalog.length;
 }
 
@@ -65,10 +69,13 @@ function argumentsFromProcess(argv: string[]): RefreshArguments {
   }
 
   const root = resolve(process.cwd());
-  const regions = (values.get("--regions") ?? process.env.AWS_REGION ?? "us-east-1")
-    .split(",")
-    .map((region) => region.trim())
-    .filter(Boolean);
+  const regionsFile = values.get("--regions-file");
+  const regions = regionsFile
+    ? loadApprovedCatalogRegions(regionsFile)
+    : (values.get("--regions") ?? process.env.AWS_REGION ?? "us-east-1")
+      .split(",")
+      .map((region) => region.trim())
+      .filter(Boolean);
   const hardwarePath = resolve(root, values.get("--hardware") ?? "src/catalog/data/aws-instances-consolidated.json");
   const localStoragePath = resolve(root, values.get("--local-storage") ?? "src/catalog/data/sqlserver-local-instance-storage.json");
   const outputPath = resolve(root, values.get("--output") ?? "src/catalog/data/rds-sqlserver-orderable.json");
@@ -78,6 +85,48 @@ function argumentsFromProcess(argv: string[]): RefreshArguments {
   }
 
   return { regions, hardwarePath, localStoragePath, outputPath };
+}
+
+function preserveUnchangedCatalogTimestamps(
+  refreshedCatalog: ReturnType<typeof instanceCatalogFromOrderableOptions>,
+  existingCatalog: ReturnType<typeof instanceCatalogFromOrderableOptions>
+): ReturnType<typeof instanceCatalogFromOrderableOptions> {
+  const existingByKey = new Map(existingCatalog.map((entry) => [catalogEntryIdentity(entry), entry]));
+  return refreshedCatalog.map((entry) => {
+    const existing = existingByKey.get(catalogEntryIdentity(entry));
+    if (!existing || !catalogEntriesMatchIgnoringRefreshTime(entry, existing)) return entry;
+    return {
+      ...entry,
+      catalogRefreshedAt: existing.catalogRefreshedAt
+    };
+  });
+}
+
+function catalogEntriesMatchIgnoringRefreshTime(
+  left: ReturnType<typeof instanceCatalogFromOrderableOptions>[number],
+  right: ReturnType<typeof instanceCatalogFromOrderableOptions>[number]
+): boolean {
+  const { catalogRefreshedAt: _leftRefreshedAt, ...leftComparable } = left;
+  const { catalogRefreshedAt: _rightRefreshedAt, ...rightComparable } = right;
+  return stableStringify(leftComparable) === stableStringify(rightComparable);
+}
+
+function catalogEntryIdentity(entry: ReturnType<typeof instanceCatalogFromOrderableOptions>[number]): string {
+  return [
+    entry.region ?? "",
+    entry.instanceClass,
+    entry.engine ?? "",
+    entry.engineVersion ?? "",
+    entry.licenseModel ?? "",
+    entry.multiAzCapable === undefined ? "" : String(entry.multiAzCapable)
+  ].join("|");
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(",")}}`;
 }
 
 if (process.argv[1] && process.argv[1].endsWith("refresh.js")) {

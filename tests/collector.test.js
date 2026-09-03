@@ -14,7 +14,7 @@ function read(path) {
 }
 
 describe("standalone Cost Optimization collector package", () => {
-  it("adds an explicit RunMefirst toggle that defaults off", () => {
+  it("COL-001: adds an explicit RunMefirst toggle that defaults off", () => {
     const runMeFirst = read("collector/costoptimization/RunMefirst.ps1");
 
     assert.match(runMeFirst, /Enable Cost Optimization diagnostics/);
@@ -28,7 +28,7 @@ describe("standalone Cost Optimization collector package", () => {
     assert.doesNotMatch(runMeFirst, /RDS Cost Optimization Collector - SQL Server/);
   });
 
-  it("passes the costoptimization switch through launcher and collector scripts", () => {
+  it("COL-002: passes the costoptimization switch through launcher and collector scripts", () => {
     for (const file of collectorFiles.slice(1)) {
       const content = read(file);
       assert.match(content, /\[switch\]\$costoptimization/, `${file} should declare -costoptimization`);
@@ -38,7 +38,7 @@ describe("standalone Cost Optimization collector package", () => {
     assert.match(launcher, /\$passArgs\.costoptimization = \$true/);
   });
 
-  it("exports only the required SQL-only Cost Optimization diagnostic CSV", () => {
+  it("COL-003: exports only the required SQL-only Cost Optimization diagnostic CSV", () => {
     const collector = read("collector/costoptimization/SSATcollector.ps1");
     const compatibleCollector = read("collector/costoptimization/SSATcollector_compatible.ps1");
 
@@ -58,7 +58,7 @@ describe("standalone Cost Optimization collector package", () => {
     assert.equal((compatibleCollector.match(/Export-CostOptimizationDiagnostics -ServerName/g) ?? []).length, 2);
   });
 
-  it("collects verified opt-in memory, file IO, and tempdb evidence in one table", () => {
+  it("COL-004: collects verified opt-in memory, file IO, and tempdb evidence in one table", () => {
     for (const file of collectorFiles.slice(2)) {
       const collector = read(file);
 
@@ -113,7 +113,7 @@ describe("standalone Cost Optimization collector package", () => {
     }
   });
 
-  it("keeps Cost Optimization time-series export and manifest export behind the opt-in toggle", () => {
+  it("COL-005: keeps Cost Optimization time-series export and manifest export behind the opt-in toggle", () => {
     for (const file of collectorFiles.slice(2)) {
       const collector = read(file);
       const guardedExports = collector.match(/if \(\$costoptimization\) \{[\s\S]*?Export-CostOptimizationTimeSeries -ServerName[\s\S]*?Export-CostOptimizationDiagnostics -ServerName[\s\S]*?Export-CollectorRunManifest -ServerEntry[\s\S]*?\}/g) ?? [];
@@ -124,7 +124,7 @@ describe("standalone Cost Optimization collector package", () => {
     }
   });
 
-  it("keeps per-minute additions behind the existing opt-in collection toggle", () => {
+  it("COL-006: keeps per-minute additions behind the existing opt-in collection toggle", () => {
     for (const file of collectorFiles.slice(2)) {
       const collector = read(file);
       assert.match(collector, /\$costOptimizationCreateSql = ""/);
@@ -135,7 +135,7 @@ describe("standalone Cost Optimization collector package", () => {
     }
   });
 
-  it("uses compact Cost Optimization collection without legacy MEM and DBIO staging", () => {
+  it("COL-007: uses compact Cost Optimization collection without legacy MEM and DBIO staging", () => {
     for (const file of collectorFiles.slice(2)) {
       const collector = read(file);
       const jobBlock = collector.match(/\$jobCommand = @"([\s\S]*?)"@\r?\n\s+\$jobCommandSql/)?.[1] ?? "";
@@ -157,7 +157,7 @@ describe("standalone Cost Optimization collector package", () => {
     }
   });
 
-  it("preserves SQL Server-visible CPU metadata and existing CPU evidence", () => {
+  it("COL-008: preserves SQL Server-visible CPU metadata and existing CPU evidence", () => {
     for (const file of collectorFiles.slice(2)) {
       const collector = read(file);
       assert.match(collector, /cpu_count AS \[Logical CPU Count\]/);
@@ -168,7 +168,7 @@ describe("standalone Cost Optimization collector package", () => {
     }
   });
 
-  it("does not add forbidden high-impact capture patterns", () => {
+  it("COL-009: does not add forbidden high-impact capture patterns", () => {
     const combined = collectorFiles.map(read).join("\n").toLowerCase();
 
     for (const forbidden of [
@@ -196,7 +196,7 @@ describe("standalone Cost Optimization collector package", () => {
     }
   });
 
-  it("keeps the collector spreadsheet SSAT-style with only approved current comparison fields", () => {
+  it("COL-010: keeps the collector spreadsheet SSAT-style with only approved current comparison fields", () => {
     const sample = read("collector/costoptimization/servers_credentials_sample.csv");
     const header = sample.split(/\r?\n/)[0];
 
@@ -213,7 +213,7 @@ describe("standalone Cost Optimization collector package", () => {
     assert.equal(sample.includes("Auth"), false);
   });
 
-  it("exports a non-secret collector run manifest from the standalone collector", () => {
+  it("COL-011: exports a non-secret collector run manifest from the standalone collector", () => {
     for (const file of [
       "collector/costoptimization/SSATcollector.ps1",
       "collector/costoptimization/SSATcollector_compatible.ps1"
@@ -231,7 +231,7 @@ describe("standalone Cost Optimization collector package", () => {
     }
   });
 
-  it("uses an existing customer-named output directory instead of nesting another one", () => {
+  it("COL-012: uses an existing customer-named output directory instead of nesting another one", () => {
     const runMeFirst = read("collector/costoptimization/RunMefirst.ps1");
     const collector = read("collector/costoptimization/SSATcollector.ps1");
     const compatibleCollector = read("collector/costoptimization/SSATcollector_compatible.ps1");

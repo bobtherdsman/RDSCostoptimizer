@@ -163,6 +163,7 @@ export function buildWorkloadOptimizationReport(input: WorkloadReportInput): Wor
     actionPlan: actionPlan(
       status,
       input.result.currentConfig,
+      input.result.recommendedConfig,
       blockers,
       limitingResources,
       topDatabaseDrivers,
@@ -204,17 +205,7 @@ export function toJsonSummaryReport(reports: readonly WorkloadOptimizationReport
 
 export function toPdfExecutiveSummary(reports: WorkloadOptimizationReport | readonly WorkloadOptimizationReport[]): Uint8Array {
   const items: readonly WorkloadOptimizationReport[] = Array.isArray(reports) ? reports : [reports];
-  const lines = executiveSummaryLines(items).flatMap((line) => wrapLine(line, 95)).slice(0, 58);
-  const content = [
-    "BT",
-    "/F1 10 Tf",
-    "12 TL",
-    "50 760 Td",
-    ...lines.map((line, index) => `${index === 0 ? "" : "T* "}(${pdfEscape(line)}) Tj`),
-    "ET"
-  ].join("\n");
-
-  return buildSimplePdf(content);
+  return buildSimplePdf(businessPdfPages(items));
 }
 export function toCsvReport(reports: WorkloadOptimizationReport | readonly WorkloadOptimizationReport[]): string {
   const items: readonly WorkloadOptimizationReport[] = Array.isArray(reports) ? reports : [reports];
@@ -477,7 +468,14 @@ function assessmentArtifacts(
       label: "Structured JSON evidence package",
       format: "json",
       scope: "fleet",
-      includedSections: [...commonSections, ...evidenceSections, "fleet summary"],
+      includedSections: [
+        ...commonSections,
+        ...evidenceSections,
+        "fleet summary",
+        "blockers",
+        "harness findings",
+        "preserved evidence references"
+      ],
       notes: ["Available from the JSON export link; credentials are not included."]
     },
     {
@@ -489,7 +487,9 @@ function assessmentArtifacts(
         "fleet counts",
         "per-server decision row",
         "CPU, memory, IOPS, throughput, tempdb, edition, orderability, and evidence fields",
-        "candidate and blocker summaries"
+        "candidate and blocker summaries",
+        "database drivers",
+        "harness findings"
       ],
       notes: ["Available from the CSV export link for spreadsheet review."]
     },
@@ -498,8 +498,8 @@ function assessmentArtifacts(
       label: "PDF-style executive summary",
       format: "pdf",
       scope: "fleet",
-      includedSections: ["fleet summary", "per-server outcome", "outcome rationale", "next action"],
-      notes: ["Available from the PDF export link; pricing remains deferred."]
+      includedSections: ["fleet summary", "per-server outcome", "top blockers or opportunities", "non-financial workload visual", "next action"],
+      notes: ["Available from the PDF export link; pricing is not included."]
     }
   ];
 }
@@ -631,6 +631,7 @@ function advisorySignals(databases: DatabaseAttribution[], currentConfig: Curren
 function actionPlan(
   status: WorkloadReportStatus,
   currentConfig: CurrentRdsConfig,
+  optimizedConfig: CurrentRdsConfig | undefined,
   blockers: OptimizationBlocker[],
   limitingResources: LimitingResourceAssessment[],
   topDatabaseDrivers: DatabaseDriverSummary[],
@@ -642,8 +643,7 @@ function actionPlan(
     actions.push(noOptimizationRecommendation(currentConfig, blockers, limitingResources));
     actions.push(...noOptimizationFollowUps(blockers, limitingResources));
   } else {
-    actions.push("Review the recommended target as workload-fit only; pricing is deferred.");
-    actions.push("Validate the change in a maintenance window with normal RDS snapshot and rollback planning.");
+    actions.push(optimizedNextAction(status, optimizedConfig));
     if (status === "aggressive_optimization") {
       actions.push("Treat this as an aggressive, medium-confidence option and validate memory behavior under representative load before production adoption.");
     }
@@ -671,25 +671,44 @@ function actionPlan(
   return unique(actions);
 }
 
+function optimizedNextAction(status: WorkloadReportStatus, optimizedConfig: CurrentRdsConfig | undefined): string {
+  const target = optimizedConfig?.instanceClass ?? "the optimized target";
+  if (status === "aggressive_optimization") {
+    return `Validate ${target} before any production change: confirm the workload window is representative, review the CSV/JSON evidence, and prepare a maintenance-window plan with normal RDS snapshot and rollback.`;
+  }
+  return `Proceed with controlled validation for ${target}: confirm the workload window is representative, review the CSV/JSON evidence, and prepare a maintenance-window plan with normal RDS snapshot and rollback.`;
+}
+
 function noOptimizationRecommendation(
   currentConfig: CurrentRdsConfig,
   blockers: readonly OptimizationBlocker[],
   limitingResources: readonly LimitingResourceAssessment[]
 ): string {
-  const reasons = noOptimizationReasons(blockers, limitingResources);
-  const resolution = noOptimizationResolution(blockers, limitingResources);
-  return `Stay as is on the current instance (${currentConfig.instanceClass}) because ${formatSentenceList(reasons)}. Reassess only after ${resolution}.`;
+  const primary = primaryNoOptimizationBlocker(blockers, limitingResources);
+  const observed = primary?.observed === undefined
+    ? "observed demand unavailable"
+    : `observed demand ${round(primary.observed)}${primary.unit ? " " + primary.unit : ""}`;
+  const capacity = primary?.limit === undefined
+    ? "safe capacity unavailable"
+    : `safe capacity ${round(primary.limit)}${primary.unit ? " " + primary.unit : ""}`;
+  return `Stay as is on ${currentConfig.instanceClass}. Primary blocker: ${primary?.label ?? "no lower candidate passed every required gate"}; ${observed}; ${capacity}.`;
 }
 
-function noOptimizationReasons(
+function primaryNoOptimizationBlocker(
   blockers: readonly OptimizationBlocker[],
   limitingResources: readonly LimitingResourceAssessment[]
-): string[] {
-  const blockerReasons = blockers.map((blocker) => `${blockerReasonLabel(blocker)}: ${blocker.message}`);
-  const resourceReasons = limitingResources
-    .filter((resource) => resource.status === "blocking")
-    .map((resource) => `${resourceReasonLabel(resource)}: ${resource.reason}`);
-  return unique([...blockerReasons, ...resourceReasons]).slice(0, 5);
+): { label: string; observed?: number; limit?: number; unit?: string } | undefined {
+  const blockingResource = limitingResources.find((resource) => resource.status === "blocking");
+  if (blockingResource) {
+    return {
+      label: resourceReasonLabel(blockingResource),
+      observed: blockingResource.observed,
+      limit: blockingResource.limit,
+      unit: blockingResource.unit
+    };
+  }
+  const blocker = blockers[0];
+  return blocker ? { label: blockerReasonLabel(blocker) } : undefined;
 }
 
 function blockerReasonLabel(blocker: OptimizationBlocker): string {
@@ -715,56 +734,20 @@ function resourceReasonLabel(resource: LimitingResourceAssessment): string {
   return "orderability or current-configuration issue";
 }
 
-function noOptimizationResolution(
-  blockers: readonly OptimizationBlocker[],
-  limitingResources: readonly LimitingResourceAssessment[]
-): string {
-  const items = noOptimizationResolutionItems(blockers, limitingResources);
-  if (items.length === 0) {
-    return "new representative evidence and an orderable candidate prove that every CPU, memory, IOPS, throughput, tempdb, edition, and orderability gate passes";
-  }
-  return `${formatSentenceList(items)} ${items.length === 1 ? "is" : "are"} resolved`;
+function resourceSignalLabel(resource: LimitingResourceAssessment): string {
+  if (resource.status === "blocking") return resourceReasonLabel(resource);
+  if (resource.dimension === "cpu") return "CPU gate passed";
+  if (resource.dimension === "memory") return "memory gate passed";
+  if (resource.dimension === "iops") return "IOPS gate passed";
+  if (resource.dimension === "throughput") return "throughput gate passed";
+  if (resource.dimension === "tempdb") return "tempdb gate passed";
+  if (resource.dimension === "edition") return "edition gate passed";
+  if (resource.dimension === "evidence") return "evidence gate passed";
+  return "orderability gate passed";
 }
 
-function noOptimizationResolutionItems(
-  blockers: readonly OptimizationBlocker[],
-  limitingResources: readonly LimitingResourceAssessment[]
-): string[] {
-  const codeAndReason = [
-    ...blockers.map((blocker) => ({ code: blocker.code, reason: blocker.message, dimension: blocker.dimension })),
-    ...limitingResources
-      .filter((resource) => resource.status === "blocking")
-      .map((resource) => ({ code: resource.dimension, reason: resource.reason, dimension: resource.dimension }))
-  ];
-  const dimensions = new Set(codeAndReason.map((item) => item.dimension));
-  const values: string[] = [];
-
-  if (codeAndReason.some((item) => isEvidenceWindowIssue(item.code, item.reason))) {
-    values.push("a representative collection window of at least 7 days, preferably 14 days, with customer confirmation of normal peak workload");
-  }
-  if (dimensions.has("cpu")) {
-    values.push("a lower candidate with enough SQL-visible vCPU for the projected SQL and total CPU gates");
-  }
-  if (dimensions.has("memory")) {
-    values.push("memory pressure, working-set, and memory-to-I/O evidence showing the lower-memory candidate is safe");
-  }
-  if (dimensions.has("iops")) {
-    values.push("a candidate whose sustained and burst instance IOPS capability fits the observed physical I/O demand");
-  }
-  if (dimensions.has("throughput")) {
-    values.push("a candidate whose sustained and burst throughput capability fits the observed byte-rate demand");
-  }
-  if (dimensions.has("tempdb")) {
-    values.push("a tempdb placement with enough local capacity or a normal-storage path that fits the remapped demand");
-  }
-  if (dimensions.has("edition")) {
-    values.push("all Enterprise-to-Standard feature, scale, vendor, orderability, and migration issues");
-  }
-  if (dimensions.has("orderability")) {
-    values.push("the missing or unsupported endpoint, Region, SQL Server version, edition, current RDSSize, or orderability evidence");
-  }
-
-  return unique(values);
+function resourceGate(report: WorkloadOptimizationReport, dimension: LimitingResourceAssessment["dimension"]): LimitingResourceAssessment | undefined {
+  return report.limitingResources.find((resource) => resource.dimension === dimension);
 }
 
 function noOptimizationFollowUps(
@@ -935,78 +918,348 @@ function customerFacingOutcome(report: WorkloadOptimizationReport): string {
     : `Scaled down to ${report.recommendedConfig?.instanceClass ?? "the optimized instance"}`;
 }
 
-function executiveSummaryLines(reports: readonly WorkloadOptimizationReport[]): string[] {
+function businessPdfPages(reports: readonly WorkloadOptimizationReport[]): string[] {
   const summary = buildWorkloadOptimizationSummary(reports);
-  const lines = [
-    "RDS SQL Server Workload Optimization Executive Summary",
-    "Pricing is deferred. This summary reports workload fit, evidence, and next actions only.",
-    `Fleet summary: total=${summary.totalServers}, scaled down=${summary.optimizedServers}, stay as is=${summary.notOptimizedServers}`,
-    ""
-  ];
-
-  for (const report of reports) {
-    lines.push(`Server: ${report.serverName ?? "unknown"}`);
-    lines.push(`Outcome: ${customerFacingOutcome(report)} | Confidence: ${report.confidence}`);
-    if (report.cpuAssessment) {
-      lines.push(`CPU signal: ${formatCpuState(report.cpuAssessment.state)} | current/candidate visible vCPU=${report.cpuAssessment.currentVisibleVcpu}/${report.cpuAssessment.candidateVisibleVcpu ?? report.cpuAssessment.currentVisibleVcpu}`);
-      lines.push(`Projected SQL CPU P95/P99=${report.cpuAssessment.projectedSqlCpuP95Pct ?? "n/a"}%/${report.cpuAssessment.projectedSqlCpuP99Pct ?? "n/a"}% | total CPU P99=${report.cpuAssessment.projectedTotalCpuP99Pct ?? "n/a"}% | Other CPU P95/P99=${report.cpuAssessment.observedOtherCpuP95Pct ?? "n/a"}%/${report.cpuAssessment.observedOtherCpuP99Pct ?? "n/a"}%`);
-    }
-    if (report.evidenceWindow) {
-      lines.push(`Evidence window: ${report.evidenceWindow.durationDays} days | ${report.evidenceWindow.classification} | continuity=${report.evidenceWindow.continuityStatus}`);
-      lines.push(`Evidence confidence: ${report.evidenceWindow.confidenceReason}`);
-    }
-    lines.push(`Current: ${report.currentConfig.instanceClass} | storage design retained: ${report.currentConfig.storageType}`);
-    lines.push(report.recommendedConfig ? `Optimized instance: ${report.recommendedConfig.instanceClass}` : `Selected instance: ${report.currentConfig.instanceClass}`);
-    if (report.enterpriseToStandard) {
-      lines.push(`Enterprise to Standard: ${report.enterpriseToStandard.status} | migration path=${report.enterpriseToStandard.acceptedMigrationPath ?? "not accepted"}`);
-    }
-    if (report.limitingResources.length > 0) {
-      lines.push(`Resource gates: ${report.limitingResources.map(formatLimitingResource).join("; ")}`);
-    }
-    if (report.topDatabaseDrivers.length > 0) {
-      lines.push(`Top DB: ${formatDatabaseDriver(report.topDatabaseDrivers[0])}`);
-    }
-    if (report.whyOptimized.length > 0) {
-      lines.push(`Why scaled down: ${report.whyOptimized.join("; ")}`);
-    }
-    const why = whyNotOptimized(report);
-    if (why.length > 0) {
-      lines.push(`Why stay as is: ${why.join("; ")}`);
-    }
-    if (report.supportingEvidence.length > 0) {
-      lines.push(`Supporting evidence: ${report.supportingEvidence.join("; ")}`);
-    }
-    if (report.actionPlan.length > 0) {
-      lines.push(`Next action: ${report.actionPlan[0]}`);
-    }
-    lines.push("");
+  const pages = [overviewPdfPage(reports, summary)];
+  for (const report of reports.slice(0, 12)) {
+    pages.push(serverPdfPage(report));
   }
+  return pages;
+}
 
+function overviewPdfPage(reports: readonly WorkloadOptimizationReport[], summary: WorkloadOptimizationSummary): string {
+  const commands: string[] = [
+    ...pageChrome("RDS SQL Server Workload Optimization", "Business PDF"),
+    pdfText("Executive Decision Summary", 44, 724, 22, "F2", INK),
+    pdfText("Pricing is not included. This PDF makes no financial amount, cost chart, or dollar claim.", 44, 700, 9, "F1", MUTED),
+    ...kpiTile(44, 626, "Total servers", String(summary.totalServers), "Collector packages analyzed"),
+    ...kpiTile(180, 626, "Scaled down", String(summary.optimizedServers), "Workloads with a lower target"),
+    ...kpiTile(316, 626, "Validation required", String(summary.aggressiveOptimizationServers), "Hard gates fit with caution"),
+    ...kpiTile(452, 626, "As is", String(summary.notOptimizedServers), "Current instance retained"),
+    pdfText("Outcome mix chart", 44, 580, 13, "F2", INK),
+    ...stackedOutcomeBar(44, 554, 500, 18, summary),
+    ...legendItem(44, 524, "Scaled down", ACCENT),
+    ...legendItem(160, 524, "Validation required", WARN),
+    ...legendItem(316, 524, "As is", DANGER),
+    pdfText("Business interpretation", 44, 490, 13, "F2", INK),
+    ...wrappedPdfText(
+      `The assessment compares the current RDS SQL Server class with orderable lower compute targets. A workload is shown as scaled down only when CPU, memory, IOPS, throughput, tempdb, edition, orderability, evidence quality, and independent harness checks support the result.`,
+      44,
+      468,
+      94,
+      10,
+      "F1",
+      INK
+    ),
+    pdfText("Fleet decision table", 44, 408, 13, "F2", INK),
+    ...fleetTable(reports.slice(0, 8), 44, 380),
+    reports.length > 8
+      ? pdfText(`${reports.length - 8} additional server(s) are included in the JSON and CSV technical exports.`, 44, 104, 9, "F1", MUTED)
+      : "",
+    pdfText("Non-financial workload visual. Financial impact requires approved pricing inputs.", 44, 76, 9, "F1", MUTED),
+    pdfText("1", 548, 28, 9, "F1", MUTED)
+  ];
+  return commands.filter(Boolean).join("\n");
+}
+
+function businessResourceSummary(report: WorkloadOptimizationReport): string {
+  const blockers = report.limitingResources.filter((resource) => resource.status === "blocking");
+  const source = blockers.length > 0 ? blockers : report.limitingResources;
+  return source.slice(0, 3).map((resource) => {
+    const observed = resource.observed === undefined ? "observed n/a" : `observed ${round(resource.observed)}${resource.unit ? " " + resource.unit : ""}`;
+    const limit = resource.limit === undefined ? "safe capacity n/a" : `safe capacity ${round(resource.limit)}${resource.unit ? " " + resource.unit : ""}`;
+    return `${resourceSignalLabel(resource)} (${observed}; ${limit})`;
+  }).join("; ");
+}
+
+function serverPdfPage(report: WorkloadOptimizationReport): string {
+  const selected = report.recommendedConfig ?? report.currentConfig;
+  const evidence = report.resultEvidence;
+  const cpuGate = resourceGate(report, "cpu");
+  const iopsGate = resourceGate(report, "iops");
+  const throughputGate = resourceGate(report, "throughput");
+  const currentVcpu = report.cpuAssessment?.currentVisibleVcpu ?? evidence?.currentVcpu;
+  const targetVcpu = report.recommendedConfig
+    ? report.cpuAssessment?.candidateVisibleVcpu ?? evidence?.optimizedVcpu
+    : currentVcpu;
+  const memoryFloorGb = evidence?.memoryRequiredFloorGb ?? evidence?.requiredMemoryGb;
+  const memoryTargetGb = evidence?.candidateMemoryGb;
+  const memoryShape = memoryTargetGb === undefined
+    ? metricBar("Memory required floor", memoryFloorGb, 316, 558, 220, "GB", "Required")
+    : comparisonBar("Memory floor vs target", memoryFloorGb, memoryTargetGb, 316, 558, 220, "GB", "Required", "Target");
+  const projectedSqlCpuP95Pct = report.cpuAssessment?.projectedSqlCpuP95Pct ?? evidence?.projectedSqlCpuP95Pct ?? cpuGate?.observed;
+  const projectedSqlCpuP99Pct = report.cpuAssessment?.projectedSqlCpuP99Pct ?? evidence?.projectedSqlCpuP99Pct;
+  const cpuP95LimitPct = report.cpuAssessment?.p95TargetPct ?? evidence?.cpuP95TargetPct ?? cpuGate?.limit ?? 70;
+  const cpuP99LimitPct = report.cpuAssessment?.p99SafetyLimitPct ?? evidence?.cpuP99SafetyLimitPct ?? 90;
+  const iopsObserved = evidence?.iopsP95 ?? evidence?.requiredIops ?? iopsGate?.observed ?? evidence?.currentNormalPathIopsP95;
+  const iopsLimit = evidence?.candidateBaselineIops ?? iopsGate?.limit;
+  const throughputObserved = evidence?.throughputP95 ?? evidence?.requiredThroughputMbps ?? throughputGate?.observed ?? evidence?.currentNormalPathThroughputP95;
+  const throughputLimit = evidence?.candidateBaselineThroughputMbps ?? throughputGate?.limit;
+  const topDriver = report.topDatabaseDrivers[0]?.databaseName ?? "No defensible database driver";
+  const nextAction = report.actionPlan[0] ?? "Review technical evidence before action.";
+  const title = report.serverName ?? "unknown";
+  const commands: string[] = [
+    ...pageChrome(title, customerFacingOutcome(report)),
+    pdfText("Business Decision", 44, 724, 18, "F2", INK),
+    pdfText(customerFacingOutcome(report), 44, 700, 13, "F2", statusColor(report.status)),
+    pdfText(`Confidence: ${report.confidence ?? "n/a"} | Evidence window: ${formatEvidenceWindow(report)}`, 44, 680, 9, "F1", MUTED),
+    ...beforeAfterPanel(report, 44, 626),
+    pdfText("Optimization shape", 316, 638, 13, "F2", INK),
+    ...comparisonBar("Visible vCPU", currentVcpu, targetVcpu, 316, 610, 220, "vCPU"),
+    ...memoryShape,
+    pdfText("Workload gate snapshot", 44, 508, 13, "F2", INK),
+    ...gateBar("Projected SQL CPU P95", projectedSqlCpuP95Pct, cpuP95LimitPct, 44, 478, "%"),
+    ...gateBar("Projected SQL CPU P99", projectedSqlCpuP99Pct, cpuP99LimitPct, 44, 432, "%"),
+    ...gateBar("IOPS P95", iopsObserved, iopsLimit, 316, 478, "IOPS"),
+    ...gateBar("Throughput P95", throughputObserved, throughputLimit, 316, 432, "MiB/s"),
+    pdfText("Meaningful business signals", 44, 360, 13, "F2", INK),
+    ...signalList([
+      `Key workload signals: ${businessResourceSummary(report) || "No blocking resource gate."}`,
+      `Top database driver: ${topDriver}.`,
+      `Technical audit trail: candidate history, blockers, resource gates, and harness findings are preserved in CSV/JSON.`,
+      report.enterpriseToStandard?.status === "blocked"
+        ? "Edition opportunity: Standard Edition is blocked and should stay separate from compute scaling."
+        : report.enterpriseToStandard?.eligible
+          ? "Edition opportunity: Standard Edition requires a separate migration plan."
+          : "Edition opportunity: no separate edition migration is included in this PDF."
+    ], 44, 336),
+    pdfText("Next Action", 44, 178, 13, "F2", INK),
+    ...wrappedPdfText(nextAction, 44, 156, 92, 10, "F1", INK),
+    pdfText("Pricing is not included. No dollar amount or cost chart is shown.", 44, 76, 9, "F1", MUTED)
+  ];
+  return commands.join("\n");
+}
+
+function pageChrome(title: string, subtitle: string): string[] {
+  return [
+    rect(0, 760, 612, 32, NAVY),
+    pdfText(title, 44, 772, 11, "F2", WHITE),
+    pdfText(subtitle, 420, 772, 9, "F1", WHITE),
+    line(44, 62, 568, 62, LINE),
+    pdfText("Standalone RDS SQL Server workload optimization. Storage redesign, automated RDS changes, and pricing are outside this phase.", 44, 44, 8, "F1", MUTED)
+  ];
+}
+
+function kpiTile(x: number, y: number, label: string, value: string, note: string): string[] {
+  return [
+    rect(x, y, 120, 62, PANEL),
+    strokeRect(x, y, 120, 62, LINE),
+    pdfText(label, x + 10, y + 42, 8, "F1", MUTED),
+    pdfText(value, x + 10, y + 19, 22, "F2", INK),
+    pdfText(note, x + 10, y + 8, 7, "F1", MUTED)
+  ];
+}
+
+function stackedOutcomeBar(x: number, y: number, width: number, height: number, summary: WorkloadOptimizationSummary): string[] {
+  const total = Math.max(summary.totalServers, 1);
+  const scaled = width * summary.optimizedServers / total;
+  const validation = width * summary.aggressiveOptimizationServers / total;
+  const asIs = Math.max(0, width - scaled - validation);
+  return [
+    rect(x, y, scaled, height, ACCENT),
+    rect(x + scaled, y, validation, height, WARN),
+    rect(x + scaled + validation, y, asIs, height, DANGER),
+    strokeRect(x, y, width, height, LINE)
+  ];
+}
+
+function legendItem(x: number, y: number, label: string, color: PdfColor): string[] {
+  return [
+    rect(x, y - 8, 10, 10, color),
+    pdfText(label, x + 16, y - 7, 9, "F1", INK)
+  ];
+}
+
+function fleetTable(reports: readonly WorkloadOptimizationReport[], x: number, y: number): string[] {
+  const commands = [
+    rect(x, y, 520, 24, NAVY),
+    pdfText("Server", x + 8, y + 9, 8, "F2", WHITE),
+    pdfText("Outcome", x + 190, y + 9, 8, "F2", WHITE),
+    pdfText("Current", x + 318, y + 9, 8, "F2", WHITE),
+    pdfText("Target", x + 420, y + 9, 8, "F2", WHITE)
+  ];
+  reports.forEach((report, index) => {
+    const rowY = y - 26 - index * 30;
+    commands.push(rect(x, rowY, 520, 28, index % 2 === 0 ? WHITE : PANEL));
+    commands.push(strokeRect(x, rowY, 520, 28, LINE));
+    commands.push(pdfText(trimPdfText(report.serverName ?? "unknown", 28), x + 8, rowY + 10, 8, "F1", INK));
+    commands.push(pdfText(statusLabel(report.status), x + 190, rowY + 10, 8, "F2", statusColor(report.status)));
+    commands.push(pdfText(report.currentConfig.instanceClass, x + 318, rowY + 10, 8, "F1", INK));
+    commands.push(pdfText((report.recommendedConfig ?? report.currentConfig).instanceClass, x + 420, rowY + 10, 8, "F1", INK));
+  });
+  return commands;
+}
+
+function beforeAfterPanel(report: WorkloadOptimizationReport, x: number, y: number): string[] {
+  const selected = report.recommendedConfig ?? report.currentConfig;
+  return [
+    rect(x, y - 22, 236, 70, PANEL),
+    strokeRect(x, y - 22, 236, 70, LINE),
+    pdfText("Current", x + 12, y + 26, 8, "F1", MUTED),
+    pdfText(report.currentConfig.instanceClass, x + 12, y + 8, 13, "F2", INK),
+    pdfText("Target", x + 136, y + 26, 8, "F1", MUTED),
+    pdfText(selected.instanceClass, x + 136, y + 8, 13, "F2", report.recommendedConfig ? ACCENT : DANGER),
+    pdfText(report.recommendedConfig ? "Lower compute target passed workload gates." : "Current instance retained by workload gates.", x + 12, y - 10, 8, "F1", MUTED)
+  ];
+}
+
+function comparisonBar(label: string, current: number | undefined, target: number | undefined, x: number, y: number, width: number, unit: string, currentLabel = "Current", targetLabel = "Target"): string[] {
+  const max = Math.max(current ?? 0, target ?? 0, 1);
+  const currentWidth = width * ((current ?? 0) / max);
+  const targetWidth = width * ((target ?? 0) / max);
+  return [
+    pdfText(label, x, y + 20, 8, "F2", INK),
+    rect(x, y + 5, currentWidth, 8, MUTED_BAR),
+    rect(x, y - 10, targetWidth, 8, ACCENT),
+    pdfText(`${currentLabel} ${formatPdfNumber(current)} ${unit}`, x + width + 8, y + 2, 7, "F1", MUTED),
+    pdfText(`${targetLabel} ${formatPdfNumber(target)} ${unit}`, x + width + 8, y - 13, 7, "F1", MUTED)
+  ];
+}
+
+function metricBar(label: string, value: number | undefined, x: number, y: number, width: number, unit: string, valueLabel: string): string[] {
+  const barWidth = value === undefined ? 0 : width;
+  return [
+    pdfText(label, x, y + 20, 8, "F2", INK),
+    rect(x, y + 2, width, 8, PANEL),
+    rect(x, y + 2, barWidth, 8, ACCENT),
+    pdfText(`${valueLabel} ${formatPdfNumber(value)} ${unit}`, x + width + 8, y - 1, 7, "F1", MUTED)
+  ];
+}
+
+function gateBar(label: string, observed: number | undefined, limit: number | undefined, x: number, y: number, unit: string): string[] {
+  if (limit === undefined) {
+    return [
+      pdfText(label, x, y + 18, 8, "F2", INK),
+      rect(x, y, 190, 9, PANEL),
+      rect(x, y, observed === undefined ? 0 : 190, 9, observed === undefined ? MUTED_BAR : ACCENT),
+      pdfText(observed === undefined ? `Observed n/a ${unit}` : `Observed ${formatPdfNumber(observed)} ${unit}`, x, y - 13, 7, "F1", MUTED)
+    ];
+  }
+  const max = Math.max(observed ?? 0, limit ?? 0, 1);
+  const observedWidth = 190 * ((observed ?? 0) / max);
+  const limitX = x + 190 * ((limit ?? 0) / max);
+  const passed = observed !== undefined && limit !== undefined ? observed <= limit : undefined;
+  return [
+    pdfText(label, x, y + 18, 8, "F2", INK),
+    rect(x, y, 190, 9, PANEL),
+    rect(x, y, Math.min(observedWidth, 190), 9, passed === false ? DANGER : ACCENT),
+    line(limitX, y - 2, limitX, y + 13, NAVY),
+    pdfText(`${formatPdfNumber(observed)} / ${formatPdfNumber(limit)} ${unit}`, x, y - 13, 7, "F1", MUTED)
+  ];
+}
+
+function signalList(items: readonly string[], x: number, y: number): string[] {
+  const commands: string[] = [];
+  let cursorY = y;
+  for (const item of items) {
+    commands.push(rect(x, cursorY - 4, 5, 5, ACCENT));
+    commands.push(...wrappedPdfText(item, x + 14, cursorY, 86, 9, "F1", INK, 2));
+    cursorY -= 34;
+  }
+  return commands;
+}
+
+function wrappedPdfText(
+  value: string,
+  x: number,
+  y: number,
+  widthChars: number,
+  size: number,
+  font: "F1" | "F2",
+  color: PdfColor,
+  maxLines = 4
+): string[] {
+  return wrapPdfText(value, widthChars).slice(0, maxLines).map((lineText, index) =>
+    pdfText(lineText, x, y - index * (size + 3), size, font, color)
+  );
+}
+
+function wrapPdfText(value: string, widthChars: number): string[] {
+  const words = value.replace(/\s+/g, " ").trim().split(" ");
+  const lines: string[] = [];
+  let lineText = "";
+  for (const word of words) {
+    const candidate = lineText ? `${lineText} ${word}` : word;
+    if (candidate.length > widthChars && lineText) {
+      lines.push(lineText);
+      lineText = word;
+    } else {
+      lineText = candidate;
+    }
+  }
+  if (lineText) lines.push(lineText);
   return lines;
 }
 
-function wrapLine(line: string, width: number): string[] {
-  if (line.length <= width) return [line];
-  const wrapped: string[] = [];
-  let remaining = line;
-  while (remaining.length > width) {
-    const breakAt = remaining.lastIndexOf(" ", width);
-    const index = breakAt > 20 ? breakAt : width;
-    wrapped.push(remaining.slice(0, index));
-    remaining = remaining.slice(index).trimStart();
-  }
-  if (remaining.length > 0) wrapped.push(remaining);
-  return wrapped;
+function formatEvidenceWindow(report: WorkloadOptimizationReport): string {
+  if (!report.evidenceWindow) return "n/a";
+  return `${round(report.evidenceWindow.durationDays)} days, ${report.evidenceWindow.classification}`;
 }
 
-function buildSimplePdf(pageContent: string): Uint8Array {
+function statusLabel(status: WorkloadReportStatus): string {
+  if (status === "not_recommended") return "As is";
+  if (status === "aggressive_optimization") return "Validation required";
+  return "Scaled down";
+}
+
+function statusColor(status: WorkloadReportStatus): PdfColor {
+  if (status === "not_recommended") return DANGER;
+  if (status === "aggressive_optimization") return WARN;
+  return ACCENT;
+}
+
+function formatPdfNumber(value: number | undefined): string {
+  return value === undefined ? "n/a" : String(round(value));
+}
+
+function trimPdfText(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}...`;
+}
+
+function pdfText(value: string, x: number, y: number, size: number, font: "F1" | "F2", color: PdfColor): string {
+  return `${colorCommand(color, "fill")}\nBT /${font} ${size} Tf 1 0 0 1 ${roundPdf(x)} ${roundPdf(y)} Tm (${pdfEscape(value)}) Tj ET`;
+}
+
+function rect(x: number, y: number, width: number, height: number, color: PdfColor): string {
+  return `q ${colorCommand(color, "fill")} ${roundPdf(x)} ${roundPdf(y)} ${roundPdf(width)} ${roundPdf(height)} re f Q`;
+}
+
+function strokeRect(x: number, y: number, width: number, height: number, color: PdfColor): string {
+  return `q ${colorCommand(color, "stroke")} 0.6 w ${roundPdf(x)} ${roundPdf(y)} ${roundPdf(width)} ${roundPdf(height)} re S Q`;
+}
+
+function line(x1: number, y1: number, x2: number, y2: number, color: PdfColor): string {
+  return `q ${colorCommand(color, "stroke")} 0.8 w ${roundPdf(x1)} ${roundPdf(y1)} m ${roundPdf(x2)} ${roundPdf(y2)} l S Q`;
+}
+
+function colorCommand(color: PdfColor, mode: "fill" | "stroke"): string {
+  const suffix = mode === "fill" ? "rg" : "RG";
+  return `${color.map((value) => roundPdf(value / 255)).join(" ")} ${suffix}`;
+}
+
+function roundPdf(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function buildSimplePdf(pageContents: readonly string[]): Uint8Array {
+  const pageCount = pageContents.length;
+  const pagesObjectNumber = 2;
+  const fontNormalObjectNumber = 3 + pageCount * 2;
+  const fontBoldObjectNumber = fontNormalObjectNumber + 1;
   const objects = [
     "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
-    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
-    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
-    "4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-    `5 0 obj\n<< /Length ${byteLength(pageContent)} >>\nstream\n${pageContent}\nendstream\nendobj\n`
   ];
+  const kids: string[] = [];
+  pageContents.forEach((pageContent, index) => {
+    const pageObjectNumber = 3 + index * 2;
+    const contentObjectNumber = pageObjectNumber + 1;
+    kids.push(`${pageObjectNumber} 0 R`);
+    objects.push(`${pageObjectNumber} 0 obj\n<< /Type /Page /Parent ${pagesObjectNumber} 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${fontNormalObjectNumber} 0 R /F2 ${fontBoldObjectNumber} 0 R >> >> /Contents ${contentObjectNumber} 0 R >>\nendobj\n`);
+    objects.push(`${contentObjectNumber} 0 obj\n<< /Length ${byteLength(pageContent)} >>\nstream\n${pageContent}\nendstream\nendobj\n`);
+  });
+  objects.splice(1, 0, `2 0 obj\n<< /Type /Pages /Kids [${kids.join(" ")}] /Count ${pageCount} >>\nendobj\n`);
+  objects.push(`${fontNormalObjectNumber} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`);
+  objects.push(`${fontBoldObjectNumber} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n`);
   let pdf = "%PDF-1.4\n";
   const offsets = [0];
   for (const object of objects) {
@@ -1022,6 +1275,19 @@ function buildSimplePdf(pageContent: string): Uint8Array {
   pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
   return new TextEncoder().encode(pdf);
 }
+
+type PdfColor = readonly [number, number, number];
+
+const INK: PdfColor = [30, 41, 59];
+const MUTED: PdfColor = [100, 116, 139];
+const LINE: PdfColor = [203, 213, 225];
+const PANEL: PdfColor = [248, 250, 252];
+const WHITE: PdfColor = [255, 255, 255];
+const NAVY: PdfColor = [15, 23, 42];
+const ACCENT: PdfColor = [15, 118, 110];
+const WARN: PdfColor = [180, 83, 9];
+const DANGER: PdfColor = [180, 35, 24];
+const MUTED_BAR: PdfColor = [148, 163, 184];
 
 function pdfEscape(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");

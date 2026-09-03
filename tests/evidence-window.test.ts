@@ -4,7 +4,7 @@ import type { CanonicalWorkloadSampleSeries } from "../src/contracts/types.js";
 import { assessEvidenceWindow, assessEvidenceWindowFromDuration } from "../src/evidence-window/index.js";
 
 describe("evidence-window assessment", () => {
-  it("applies every verified duration classification", () => {
+  it("ENG-EVIDENCE-001: applies every verified duration classification", () => {
     assert.equal(assessEvidenceWindowFromDuration(24).classification, "insufficient");
     assert.equal(assessEvidenceWindowFromDuration(60).classification, "below_preliminary_window");
     assert.equal(assessEvidenceWindowFromDuration(96).classification, "preliminary");
@@ -14,13 +14,13 @@ describe("evidence-window assessment", () => {
     assert.equal(assessEvidenceWindowFromDuration(800).classification, "preferred");
   });
 
-  it("assigns preliminary, medium, and high confidence from the verified bands", () => {
+  it("ENG-EVIDENCE-002: assigns preliminary, medium, and high confidence from the verified bands", () => {
     assert.equal(assessEvidenceWindowFromDuration(96).confidence, "preliminary");
     assert.equal(assessEvidenceWindowFromDuration(168).confidence, "medium");
     assert.equal(assessEvidenceWindowFromDuration(336).confidence, "high");
   });
 
-  it("calculates duration and reports continuity without inventing an allowable-gap threshold", () => {
+  it("ENG-EVIDENCE-003: calculates duration and reports continuity without inventing an allowable-gap threshold", () => {
     const series: CanonicalWorkloadSampleSeries = {
       alignmentIntervalSeconds: 60,
       cpu: [

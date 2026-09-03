@@ -208,6 +208,7 @@ export function renderAssessmentPageHtml(view: ManualUploadPageViewModel = build
             <p class="muted">The analysis returns the optimization outcome, confidence, evidence checks, and exportable business evidence.</p>
           </div>
           <form method="post" action="/cost/analyze" enctype="multipart/form-data" data-upload-form>
+            <input type="hidden" name="exportFormats" value="json,csv,pdf">
             <label class="field">
               <span>Customer name</span>
               <input name="customerName" type="text" placeholder="Customer or account name">
@@ -258,6 +259,10 @@ export function renderManualUploadResultsHtml(view: ManualUploadResultsViewModel
       </section>`}
 
       <section class="export-row" aria-label="Exports">
+        <div class="export-row-copy">
+          <strong>Download result package</strong>
+          <span>PDF is business-oriented. CSV and JSON preserve technical detail. Pricing is not included.</span>
+        </div>
         ${view.exportActions.map((action) => action.available && action.href
           ? `<a class="button-link" href="${escapeAttribute(action.href)}" download="${escapeAttribute(action.filename ?? "rds-cost-optimization")}">${escapeHtml(action.label)}</a>`
           : `<button type="button" disabled>${escapeHtml(action.label)}</button>`).join("")}
@@ -1852,7 +1857,29 @@ function pageShell(title: string, body: string): string {
     form.is-submitting {
       opacity: 0.82;
     }
-    .export-row { margin-bottom: 16px; }
+    .export-row {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .export-row-copy {
+      flex: 1 1 260px;
+      margin-right: 10px;
+      min-width: 240px;
+    }
+    .export-row-copy strong,
+    .export-row-copy span {
+      display: block;
+    }
+    .export-row-copy span {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+      line-height: 1.35;
+      margin-top: 2px;
+    }
     .table-wrap { overflow-x: auto; margin-top: 14px; }
     table { border-collapse: collapse; width: 100%; min-width: 720px; }
     th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 10px; vertical-align: top; }
@@ -1887,6 +1914,7 @@ function pageShell(title: string, body: string): string {
       dd { margin-bottom: 8px; }
       button, .button-link { width: 100%; text-align: center; margin-right: 0; }
       .export-row { display: grid; gap: 8px; }
+      .export-row-copy { margin-right: 0; min-width: 0; }
     }
   </style>
 </head>

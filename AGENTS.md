@@ -12,8 +12,19 @@ Before making any code, collector, UI, API, architecture, documentation, or test
 - `documentation/ARCHITECTURE.md`
 - `documentation/TASKS.md`
 - `documentation/HARNESS_CONTRACT.md`
+- `documentation/rules.md`
 
 The agent must identify the exact spec, architecture, or task section that authorizes the change. If no section clearly authorizes the change, the agent must stop and ask for approval before editing.
+
+## Rules Contract Usage
+
+For every code, collector, UI, API, architecture, documentation, or test change, and for every code review or assessment, the agent must consult `documentation/rules.md` before acting.
+
+- If an existing rule applies, identify the rule id or ids being preserved, changed, or assessed.
+- If no existing rule applies, state that no rule currently covers the behavior and ask for approval before adding, changing, or assessing behavior outside the current rule contract.
+- Do not silently change behavior covered by an `enforced` rule.
+- Treat `expected-gap` rules as known gaps: document the gap and do not fix engine behavior unless the user explicitly approves that separate behavior change.
+- When adding new behavior, add or update the corresponding rule and rule-tagged test in the same change whenever practical.
 
 ## Project Root and Visibility
 

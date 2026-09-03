@@ -77,7 +77,7 @@ function request(overrides = {}) {
 
 
 describe("collector Excel input", () => {
-  it("validates local credentials without exposing login or password", () => {
+  it("API-API-001: validates local credentials without exposing login or password", () => {
     const response = normalizeCollectorExcelInput({
       rdsEndpoint: "mydb.abc123.us-east-2.rds.amazonaws.com",
       login: "admin",
@@ -100,7 +100,7 @@ describe("collector Excel input", () => {
     assert.equal(JSON.stringify(response.collectorInput).includes("SecretPassword123!"), false);
   });
 
-  it("validates required collector spreadsheet fields", () => {
+  it("API-API-002: validates required collector spreadsheet fields", () => {
     const errors = validateCollectorExcelInput({
       rdsEndpoint: "",
       login: "",
@@ -114,7 +114,7 @@ describe("collector Excel input", () => {
     assert.ok(errors.some((error) => error.code === "EXISTING_INSTANCE_INVALID"));
   });
 
-  it("allows collector run manifests to use non-RDS server identifiers", () => {
+  it("API-API-003: allows collector run manifests to use non-RDS server identifiers", () => {
     const response = normalizeCollectorRunManifestInput({
       rdsEndpoint: "GAP_96XL_IOPS",
       login: "",
@@ -128,13 +128,13 @@ describe("collector Excel input", () => {
     assert.equal(response.collectorInput.region, undefined);
   });
 
-  it("parses region from standard RDS endpoints", () => {
+  it("API-API-004: parses region from standard RDS endpoints", () => {
     assert.equal(parseRdsRegionFromEndpoint("mydb.abc123.eu-central-1.rds.amazonaws.com"), "eu-central-1");
     assert.equal(parseRdsRegionFromEndpoint("not-rds.example.com"), undefined);
   });
 });
 describe("analyzeWorkloadRequest", () => {
-  it("returns workload analysis reports and requested exports", () => {
+  it("API-API-005: returns workload analysis reports and requested exports", () => {
     const response = analyzeWorkloadRequest(request());
 
     assert.equal(response.ok, true);
@@ -151,7 +151,7 @@ describe("analyzeWorkloadRequest", () => {
     assert.ok(response.exports.pdf && Buffer.from(response.exports.pdf, "base64").toString("utf8").startsWith("%PDF-1.4"));
   });
 
-  it("returns validation errors instead of running analysis when required inputs are missing", () => {
+  it("API-API-006: returns validation errors instead of running analysis when required inputs are missing", () => {
     const response = analyzeWorkloadRequest({ catalog: [], servers: [] });
 
     assert.equal(response.ok, false);
@@ -160,7 +160,7 @@ describe("analyzeWorkloadRequest", () => {
     assert.ok(response.errors.some((error) => error.code === "SERVERS_REQUIRED"));
   });
 
-  it("validates per-server workload inputs", () => {
+  it("API-API-007: validates per-server workload inputs", () => {
     const invalid = request({
       servers: [
         {
@@ -191,7 +191,7 @@ describe("analyzeWorkloadRequest", () => {
     assert.ok(errors.some((error) => error.code === "COLLECTION_HOURS_INVALID"));
   });
 
-  it("exports reports directly as JSON or CSV", () => {
+  it("API-API-008: exports reports directly as JSON or CSV", () => {
     const response = analyzeWorkloadRequest(request({ exportFormats: ["json"] as const }));
     assert.equal(response.ok, true);
     if (!response.ok) return;
@@ -202,7 +202,7 @@ describe("analyzeWorkloadRequest", () => {
 
     assert.equal(JSON.parse(json).summary.optimizedServers, 1);
     assert.ok(csv.includes("prod-sql-01"));
-    assert.ok(Buffer.from(pdf, "base64").toString("utf8").includes("Pricing is deferred"));
+    assert.ok(Buffer.from(pdf, "base64").toString("utf8").includes("Pricing is not included"));
   });
 });
 

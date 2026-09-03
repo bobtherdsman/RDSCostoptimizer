@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assessment Workspace — RDS SQL Server Cost Optimization</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="header app">
+  <div class="nav">
+    <a class="brand" href="overview.html"><span class="mark">RDS</span><span>Cost Optimization<small>Assessment workspace</small></span></a>
+    <nav class="menu" aria-label="Primary">
+      <a href="overview.html">Overview</a>
+      <a href="services.html">Services</a>
+      <a href="assessment.html" aria-current="page">Assessment</a>
+      <a href="results.html">Results</a>
+      <a class="btn ghost" href="#">Login</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap app">
+  <section class="hero app">
+    <p class="kicker">Assessment workspace</p>
+    <h1>Upload collector evidence and generate the decision.</h1>
+    <p class="muted">The analysis returns the outcome, confidence, evidence checks, and exportable evidence for review. RDS for SQL Server only; pricing and storage redesign are out of scope.</p>
+  </section>
+
+  <div class="grid c2" style="align-items:start">
+    <section class="panel" aria-labelledby="upload-title">
+      <p class="kicker">Run the assessment</p>
+      <h2 id="upload-title" style="font-size:var(--step-h2)">Upload the collector package</h2>
+      <form method="post" action="#" enctype="multipart/form-data" novalidate>
+        <label class="field">
+          <span>Customer name</span>
+          <input name="customerName" type="text" placeholder="Customer or account name" autocomplete="organization">
+        </label>
+        <label class="field">
+          <span>Collector output ZIP</span>
+          <div class="dropzone">Drag &amp; drop the collector <strong>.zip</strong>, or
+            <input name="collectorPackages" type="file" multiple accept=".zip" style="display:block;margin:8px auto 0">
+          </div>
+        </label>
+        <button class="btn primary" type="submit">Generate decision</button>
+        <p class="muted" role="status" aria-live="polite" style="margin:.8em 0 0;font-size:13px">Multiple ZIPs are analyzed as one fleet.</p>
+      </form>
+    </section>
+
+    <aside class="summary-card" aria-label="Required input">
+      <p class="kicker">Required input</p>
+      <strong style="font-size:18px">Collector ZIP from the customer workload</strong>
+      <dl>
+        <dt>ServerName</dt><dd>Required</dd>
+        <dt>RDSSize</dt><dd>Required</dd>
+        <dt>CPU / memory / I/O</dt><dd>Sample series</dd>
+        <dt>Edition / version</dt><dd>CPUINFO</dd>
+      </dl>
+    </aside>
+  </div>
+
+  <section class="grid c2" style="margin-top:16px">
+    <div class="panel"><h3 style="font-size:var(--step-h3)">Information needed</h3>
+      <ul class="muted"><li>Collector run manifest (ServerName, RDSSize, storage, Multi-AZ)</li><li>CPU sample series</li><li>Memory, file I/O, and tempdb samples</li><li>Edition &amp; engine version (CPUINFO)</li></ul>
+    </div>
+    <div class="panel"><h3 style="font-size:var(--step-h3)">Safeguards</h3>
+      <ul class="muted"><li>No customer data is modified</li><li>Bounded, low-impact collection only</li><li>No automatic RDS changes</li><li>Owner-approved access</li></ul>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="inner">
+    <div><strong>RDS SQL Server Cost Optimization</strong><p class="muted" style="margin:.4em 0 0;max-width:34ch">Evidence-led workload-fit decisions.</p></div>
+    <div><strong>Scope</strong><ul><li>RDS for SQL Server</li><li>Collector-first evidence</li><li>Pricing deferred</li></ul></div>
+  </div>
+</footer>
+</body>
+</html>

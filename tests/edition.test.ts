@@ -141,7 +141,7 @@ function evaluate(input: {
 }
 
 describe("Enterprise-to-Standard evaluation", () => {
-  it("requires all five documented terms and returns a migration recommendation", () => {
+  it("ENG-EDITION-001: requires all five documented terms and returns a migration recommendation", () => {
     const result = evaluate();
 
     assert.equal(result.eligible, true);
@@ -152,7 +152,7 @@ describe("Enterprise-to-Standard evaluation", () => {
     assert.ok(Object.values(result.terms).every((term) => term.passed));
   });
 
-  it("does not accept an Enterprise-to-Standard change when target socket count is unknown", () => {
+  it("ENG-EDITION-002: does not accept an Enterprise-to-Standard change when target socket count is unknown", () => {
     const result = evaluate({
       candidate: { ...candidateConfig, cpuSocketCount: undefined },
       catalog: [enterpriseEntry, { ...standardEntry, cpuSocketCount: undefined }]
@@ -164,7 +164,7 @@ describe("Enterprise-to-Standard evaluation", () => {
     ));
   });
 
-  it("reports unsupported persisted database features separately", () => {
+  it("ENG-EDITION-003: reports unsupported persisted database features separately", () => {
     const featureWorkload = workload({
       edition: {
         source: "collector",
@@ -192,7 +192,7 @@ describe("Enterprise-to-Standard evaluation", () => {
     ));
   });
 
-  it("requires explicit vendor support confirmation", () => {
+  it("ENG-EDITION-004: requires explicit vendor support confirmation", () => {
     const result = evaluate({
       confirmations: {
         migrationPathAccepted: true,
@@ -206,7 +206,7 @@ describe("Enterprise-to-Standard evaluation", () => {
     ));
   });
 
-  it("applies socket, core, buffer-pool, columnstore, and per-database memory-optimized limits", () => {
+  it("ENG-EDITION-005: applies socket, core, buffer-pool, columnstore, and per-database memory-optimized limits", () => {
     const scaleWorkload = workload({
       memory: {
         pressureSignals: [],
@@ -249,7 +249,7 @@ describe("Enterprise-to-Standard evaluation", () => {
     }
   });
 
-  it("requires exact Standard Edition class and engine-version orderability", () => {
+  it("ENG-EDITION-006: requires exact Standard Edition class and engine-version orderability", () => {
     const result = evaluate({ catalog: [enterpriseEntry] });
 
     assert.equal(result.terms.rdsClassVersionOrderable.passed, false);
@@ -259,7 +259,7 @@ describe("Enterprise-to-Standard evaluation", () => {
     ));
   });
 
-  it("requires an accepted native backup/restore or AWS DMS path", () => {
+  it("ENG-EDITION-007: requires an accepted native backup/restore or AWS DMS path", () => {
     const result = evaluate({
       confirmations: {
         vendorSupportsStandardEdition: true
@@ -272,7 +272,7 @@ describe("Enterprise-to-Standard evaluation", () => {
     ));
   });
 
-  it("uses the documented SQL Server 2025 Standard scale limits", () => {
+  it("ENG-EDITION-008: uses the documented SQL Server 2025 Standard scale limits", () => {
     assert.deepEqual(standardEditionLimitsForVersion("17.0.1000.7"), {
       sqlMajorVersion: 17,
       maxSockets: 4,

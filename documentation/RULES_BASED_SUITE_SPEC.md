@@ -1,12 +1,12 @@
 # Rules-Based Regression Suite Spec (for Codex implementation)
 
-Status: DRAFT — implementation-ready
+Status: DRAFT — implementation-ready, with user-approved Windows-first verification scope
 Objective: Replace the current ad-hoc test suite with a SINGLE rules-driven regression suite. `rules.md` becomes the one source of truth for every behavior we assert. Existing test files are RETIRED once every behavior they cover is represented as a rule in `rules.md` and backed by a rule-tagged test.
 
 Hard guardrail: Do NOT change engine behavior. No edits to `src/optimizer`, `src/io`, `src/memory`, `src/edition`, `src/catalog`, `src/parser`, `src/harness` logic. This is a test/fixture/spec restructure only. If migrating a test reveals an engine bug, record it as an `expected-gap` rule and report — do NOT fix the engine here.
 
 Repo: rdscostoptimization (TypeScript, ESM, `node --test`).
-Run: `npx tsc --outDir <tmp> --noEmit false && node --test <tmp>/tests/*.test.js` with `node_modules`, `samples/`, `public/`, `dist/catalog/data/` reachable. Windows path: `npm test`.
+Run: `npm test` from the project root. This project is collector-first and Windows/PowerShell-oriented; Windows `npm test` is the required local verification path. Linux CI is optional portability evidence, not a production-readiness blocker for this collector workflow.
 
 ---
 
@@ -79,10 +79,10 @@ GOLD-07 | fixtures | enforced | sql version not orderable blocks             | g
 GOLD-08 | fixtures | enforced | edition not supported blocks                 | gold-08-edition-blocked.zip         | blocker=EDITION_NOT_SUPPORTED                         | —
 GOLD-09 | fixtures | enforced | catalog gap / storage capability unknown     | gold-09-catalog-gap-fallback.zip    | blocker=IOPS_STORAGE_CAPABILITY_UNKNOWN               | —
 GOLD-10 | fixtures | enforced | tempdb-dominant still downsizes              | gold-10-tempdb-dominant.zip         | status=recommended, rec=db.r8i.8xlarge                | —
-GOLD-11 | fixtures | enforced | multi-server mixed (A downsize, B blocked)   | NEW multi-server-mixed.zip          | per-server outcomes + fleet counts                    | —
-GOLD-12 | fixtures | enforced | cross-family path exercised                  | NEW cross-family.zip                | low-confidence/aggressive flagged; fallback justified | cpu-projection cpuComparison
-GOLD-13 | fixtures | enforced | enterprise edition + EE→SE eligibility       | NEW enterprise-edition.zip          | edition-change decision correct                       | edition/index.ts
-GOLD-14 | fixtures | enforced | Multi-AZ carried through                      | NEW multi-az.zip (MultiAz=true)     | Multi-AZ in result; sizing unaffected                 | —
+GOLD-11 | fixtures | expected-gap | multi-server mixed (A downsize, B blocked) | NEW multi-server-mixed.zip | per-server outcomes + fleet counts | pending approved source fixture package
+GOLD-12 | fixtures | expected-gap | cross-family path exercised | NEW cross-family.zip | low-confidence/aggressive flagged; fallback justified | pending approved source fixture package
+GOLD-13 | fixtures | expected-gap | enterprise edition + EE→SE eligibility | NEW enterprise-edition.zip | edition-change decision correct | pending approved source fixture package
+GOLD-14 | fixtures | expected-gap | Multi-AZ carried through | NEW multi-az.zip (MultiAz=true) | Multi-AZ in result; sizing unaffected | pending approved source fixture package
 ```
 
 ### Seed rows — ALL other areas (MIGRATED from existing tests): harness, engine, reports, collector, api, ui, server
@@ -107,8 +107,8 @@ The migration is complete only when: for every assertion in the old suite there 
 3. **Add the rule-tagged tests.** Each test title starts with its rule id (e.g. `it("CO-I-CPU-FIT: ...")`, `it("R6: ...")`, `it("GOLD-03: ...")`). Group by area. Parser R*/F* use crafted strings + a seeded PRNG (no new dep unless owner approves `fast-check` pinned; fuzz budget <30s / ~500–1000 cases; log seed on failure).
 4. **Add the coverage-guard test** (see below).
 5. **Retire old tests.** Once the guard is green AND the migration map shows 100% coverage, DELETE the superseded old test files (or fold them entirely into the rule-tagged files). No behavior may be dropped. Keep the collector download / samples-regression fixture wiring if it is the mechanism a GOLD-* rule uses.
-6. **Add fixtures** GOLD-11..14 (multi-server-mixed, cross-family, enterprise-edition, multi-az) under `samples/tool-regression/`, templated from existing gold zips + `collector/ketnra v2/multiserver-fixtures/*.zip`.
-7. **Checksum fixtures.** Commit `samples/tool-regression/CHECKSUMS.txt` (sha256 per zip). A GOLD-* fixture byte change fails unless CHECKSUMS.txt is updated in the same change.
+6. **Track future fixtures** GOLD-11..14 (multi-server-mixed, cross-family, enterprise-edition, multi-az) as `expected-gap` rules until approved source collector packages exist. Do not invent or casually synthesize gold ZIPs.
+7. **Checksum fixtures.** Commit `samples/tool-regression/CHECKSUMS.txt` (sha256 per committed zip). A GOLD-* fixture byte change fails unless CHECKSUMS.txt is updated in the same change.
 
 ---
 
@@ -156,5 +156,5 @@ This is what turns `rules.md` into a guardrail: the contract and the suite canno
 - Every rule id has exactly one referencing test; coverage guard green; no orphan rules or orphan tests.
 - Superseded old test files retired (deleted/folded) with ZERO loss of behavior coverage.
 - `enforced` rules pass; `expected-gap` rules are documented xfails, flagged to owner in the PR with reproducing input.
-- GOLD-11..14 fixtures committed + checksummed.
-- `npm test` green on Linux CI and Windows. No engine `src/**` behavior changed.
+- GOLD-11..14 are either approved real fixtures committed and checksummed, or explicitly tracked as `expected-gap` rules.
+- `npm test` green on Windows. No engine `src/**` behavior changed.

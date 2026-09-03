@@ -8,10 +8,14 @@ import type {
   OptimizationResult,
   WorkloadProfile
 } from "../contracts/types.js";
-import type {
-  CandidateRequirements,
-  InstanceCatalogEntry,
-  OptimizeCpuConfiguration
+import {
+  familyPreferenceForFamily,
+  familyPreferenceRankForEntry,
+  familyPreferenceRoleForEntry,
+  type CandidateFamilyPreferenceRole,
+  type CandidateRequirements,
+  type InstanceCatalogEntry,
+  type OptimizeCpuConfiguration
 } from "../catalog/index.js";
 
 export interface IndependentOracleContext {
@@ -89,7 +93,7 @@ function optimalSafeCandidateFinding(context: IndependentOracleContext): Indepen
     );
   }
 
-  const best = [...accepted].sort(compareSafeCandidateRecords)[0];
+  const best = [...accepted].sort((left, right) => compareSafeCandidateRecords(context, left, right))[0];
   const passed = candidateRecordMatchesConfig(best, recommended)
     && candidateRecordMatchesConfig(selected, recommended);
 
@@ -106,7 +110,7 @@ function optimalSafeCandidateFinding(context: IndependentOracleContext): Indepen
 function fallbackFamilyJustificationFinding(context: IndependentOracleContext): IndependentOracleFinding {
   const recommended = context.result.recommendedConfig!;
   const selectedFamily = family(recommended.instanceClass);
-  if (!fallbackFamilyTier(selectedFamily)) {
+  if (familyPreferenceRoleForInstanceClass(context, recommended.instanceClass) !== "fallback") {
     return finding(
       "CO-RULE-FALLBACK-FAMILY-JUSTIFIED",
       "orderability",
@@ -120,7 +124,7 @@ function fallbackFamilyJustificationFinding(context: IndependentOracleContext): 
     ?? 0;
   const orderableLeadClasses = context.catalog
     .filter((entry) =>
-      leadFamilyTier(entry.family)
+      familyPreferenceRoleForEntry(entry) === "lead"
       && entry.vcpu > 0
       && entry.vcpu <= selectedVisibleVcpu
       && entry.vcpu < context.currentVcpu
@@ -128,7 +132,7 @@ function fallbackFamilyJustificationFinding(context: IndependentOracleContext): 
     )
     .map((entry) => entry.instanceClass);
   const evaluatedLeadRecords = context.result.candidateEvaluations.filter((candidate) =>
-    leadFamilyTier(family(candidate.instanceClass))
+    familyPreferenceRoleForInstanceClass(context, candidate.instanceClass) === "lead"
     && candidate.sqlServerVisibleVcpu <= selectedVisibleVcpu
   );
   const acceptedLead = evaluatedLeadRecords.find((candidate) => candidate.accepted);
@@ -176,20 +180,23 @@ function activeCandidateEvidenceFinding(context: IndependentOracleContext): Inde
   );
 }
 
-function compareSafeCandidateRecords(left: CandidateEvaluationRecord, right: CandidateEvaluationRecord): number {
+function compareSafeCandidateRecords(
+  context: IndependentOracleContext,
+  left: CandidateEvaluationRecord,
+  right: CandidateEvaluationRecord
+): number {
   return left.sqlServerVisibleVcpu - right.sqlServerVisibleVcpu
-    || candidateFamilyTier(left) - candidateFamilyTier(right)
+    || candidateFamilyTier(context, left) - candidateFamilyTier(context, right)
     || candidateRiskRank(left) - candidateRiskRank(right)
     || candidateMemoryRank(left, right)
     || candidateConfigurationRank(left) - candidateConfigurationRank(right)
     || left.instanceClass.localeCompare(right.instanceClass);
 }
 
-function candidateFamilyTier(candidate: CandidateEvaluationRecord): number {
-  const candidateFamily = family(candidate.instanceClass);
-  if (leadFamilyTier(candidateFamily)) return 0;
-  if (fallbackFamilyTier(candidateFamily)) return 1;
-  return 2;
+function candidateFamilyTier(context: IndependentOracleContext, candidate: CandidateEvaluationRecord): number {
+  const catalogEntry = context.catalog.find((entry) => entry.instanceClass === candidate.instanceClass);
+  if (catalogEntry) return familyPreferenceRankForEntry(catalogEntry);
+  return familyPreferenceForFamily(family(candidate.instanceClass)).rank;
 }
 
 function candidateRiskRank(candidate: CandidateEvaluationRecord): number {
@@ -220,12 +227,13 @@ function candidateRecordLabel(candidate: CandidateEvaluationRecord | undefined):
   return `${candidate.instanceClass} ${candidate.cpuConfigurationType} ${candidate.sqlServerVisibleVcpu} visible vCPU`;
 }
 
-function leadFamilyTier(value: string): boolean {
-  return ["m8i", "r8i", "x2m"].includes(value);
-}
-
-function fallbackFamilyTier(value: string): boolean {
-  return ["m7i", "r7i", "x2iedn"].includes(value);
+function familyPreferenceRoleForInstanceClass(
+  context: IndependentOracleContext,
+  instanceClass: string
+): CandidateFamilyPreferenceRole {
+  const catalogEntry = context.catalog.find((entry) => entry.instanceClass === instanceClass);
+  if (catalogEntry) return familyPreferenceRoleForEntry(catalogEntry);
+  return familyPreferenceForFamily(family(instanceClass)).role;
 }
 
 function activeCpuProjectionFinding(context: IndependentOracleContext): IndependentOracleFinding {

@@ -187,7 +187,7 @@ function optimizeCpuScenario(scenarioWorkload: WorkloadProfile): OptimizationRes
 }
 
 describe("runCostHarness", () => {
-  it("passes a valid independently selected optimized size", () => {
+  it("CO-ADV-001: passes a valid independently selected optimized size", () => {
     const reproducibleWorkload = productionWorkload({
       sqlCpuPct: 20,
       currentMemoryGb: 256,
@@ -223,7 +223,7 @@ describe("runCostHarness", () => {
     assertHarnessPassed(findings);
   });
 
-  it("fails when production skips a smaller safe candidate", () => {
+  it("CO-ADV-002: fails when production skips a smaller safe candidate", () => {
     const skippedCatalog: InstanceCatalogEntry[] = [
       catalog[0],
       {
@@ -287,7 +287,7 @@ describe("runCostHarness", () => {
     ));
   });
 
-  it("fails when a fallback family is selected while an equal lead-family candidate is safe", () => {
+  it("CO-ADV-003: fails when a fallback family is selected while an equal lead-family candidate is safe", () => {
     const fallbackCatalog: InstanceCatalogEntry[] = [
       catalog[0],
       {
@@ -349,7 +349,77 @@ describe("runCostHarness", () => {
     ));
   });
 
-  it("allows a fallback family when the equal lead-family candidate failed a real gate", () => {
+  it("CO-ADV-004: uses catalog family preference metadata for fallback-family justification", () => {
+    const preferenceCatalog: InstanceCatalogEntry[] = [
+      {
+        ...catalog[0],
+        instanceClass: "db.customlead.4xlarge",
+        family: "customlead",
+        familyPreferenceRole: "lead",
+        familyPreferenceRank: 0
+      },
+      {
+        ...catalog[0],
+        instanceClass: "db.customfallback.4xlarge",
+        family: "customfallback",
+        familyPreferenceRole: "fallback",
+        familyPreferenceRank: 1
+      }
+    ];
+    const findings = runCostHarness({
+      result: validResult({
+        recommendedConfig: {
+          ...currentConfig,
+          instanceClass: "db.customfallback.4xlarge",
+          sqlServerVisibleVcpu: 16,
+          cpuConfigurationType: "default"
+        },
+        candidateEvaluations: [
+          {
+            instanceClass: "db.customfallback.4xlarge",
+            sqlServerVisibleVcpu: 16,
+            cpuConfigurationType: "default",
+            accepted: true,
+            selected: true,
+            decision: "Recommended",
+            passedGates: ["CPU", "MEMORY", "IOPS", "THROUGHPUT", "TEMPDB", "ORDERABILITY"],
+            failedGates: [],
+            limitingResources: [],
+            candidateMemoryGb: 128
+          },
+          {
+            instanceClass: "db.customlead.4xlarge",
+            sqlServerVisibleVcpu: 16,
+            cpuConfigurationType: "default",
+            accepted: true,
+            selected: false,
+            decision: "Recommended",
+            passedGates: ["CPU", "MEMORY", "IOPS", "THROUGHPUT", "TEMPDB", "ORDERABILITY"],
+            failedGates: [],
+            limitingResources: [],
+            candidateMemoryGb: 128
+          }
+        ]
+      }),
+      workload,
+      catalog: preferenceCatalog,
+      currentConfig,
+      currentVcpu: 32,
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    });
+
+    assert.ok(findings.some((finding) =>
+      !finding.passed
+      && finding.oracle === "CO-RULE-FALLBACK-FAMILY-JUSTIFIED"
+      && finding.message.includes("db.customlead.4xlarge")
+    ));
+  });
+
+  it("CO-ADV-005: allows a fallback family when the equal lead-family candidate failed a real gate", () => {
     const fallbackCatalog: InstanceCatalogEntry[] = [
       catalog[0],
       {
@@ -420,7 +490,7 @@ describe("runCostHarness", () => {
     ));
   });
 
-  it("independently rejects a recommendation backed only by generic catalog metadata", () => {
+  it("CO-ADV-006: independently rejects a recommendation backed only by generic catalog metadata", () => {
     const genericCatalog = catalog.map((entry) => ({
       ...entry,
       region: undefined,
@@ -449,7 +519,7 @@ describe("runCostHarness", () => {
     ));
   });
 
-  it("rejects a recommendation when preserved CPU evidence is tampered after optimization", () => {
+  it("CO-ADV-007: rejects a recommendation when preserved CPU evidence is tampered after optimization", () => {
     const reproducibleWorkload = productionWorkload({
       sqlCpuPct: 20,
       currentMemoryGb: 256,
@@ -495,7 +565,7 @@ describe("runCostHarness", () => {
     ));
   });
 
-  it("rejects caller-tampered CPU safety thresholds", () => {
+  it("CO-ADV-008: rejects caller-tampered CPU safety thresholds", () => {
     const base = validResult();
     const findings = runCostHarness({
       result: validResult({
@@ -521,7 +591,7 @@ describe("runCostHarness", () => {
     ));
   });
 
-  it("fails a hands-free result for unnormalized cross-family CPU projection", () => {
+  it("CO-ADV-009: fails a hands-free result for unnormalized cross-family CPU projection", () => {
     const crossFamilyCatalog: InstanceCatalogEntry[] = [
       catalog[0],
       {
@@ -581,7 +651,7 @@ describe("runCostHarness", () => {
     ));
   });
 
-  it("validates physical IOPS P95, P99, and burst behavior from preserved evidence", () => {
+  it("CO-ADV-010: validates physical IOPS P95, P99, and burst behavior from preserved evidence", () => {
     const burstCatalog: InstanceCatalogEntry[] = [
       {
         ...catalog[0],
@@ -626,7 +696,7 @@ describe("runCostHarness", () => {
     assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-I-IOPS-FIT"));
   });
 
-  it("allows physical IOPS P99 to use preserved burst capability", () => {
+  it("CO-ADV-011: allows physical IOPS P99 to use preserved burst capability", () => {
     const burstCatalog: InstanceCatalogEntry[] = [
       {
         ...catalog[0],
@@ -672,7 +742,7 @@ describe("runCostHarness", () => {
     assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-RULE-IOPS"));
   });
 
-  it("fails physical IOPS when P95 only fits burst capability", () => {
+  it("CO-ADV-012: fails physical IOPS when P95 only fits burst capability", () => {
     const burstCatalog: InstanceCatalogEntry[] = [
       {
         ...catalog[0],
@@ -710,7 +780,7 @@ describe("runCostHarness", () => {
     assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-RULE-IOPS"));
   });
 
-  it("fails physical IOPS harness validation when burst duration exceeds capability", () => {
+  it("CO-ADV-013: fails physical IOPS harness validation when burst duration exceeds capability", () => {
     const burstCatalog: InstanceCatalogEntry[] = [
       {
         ...catalog[0],
@@ -754,7 +824,7 @@ describe("runCostHarness", () => {
     assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-I-IOPS-FIT"));
   });
 
-  it("validates physical throughput independently from IOPS", () => {
+  it("CO-ADV-014: validates physical throughput independently from IOPS", () => {
     const throughputCatalog: InstanceCatalogEntry[] = [
       {
         ...catalog[0],
@@ -799,7 +869,7 @@ describe("runCostHarness", () => {
     assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-I-THROUGHPUT-FIT"));
   });
 
-  it("allows physical throughput P99 to use preserved burst capability", () => {
+  it("CO-ADV-015: allows physical throughput P99 to use preserved burst capability", () => {
     const throughputCatalog: InstanceCatalogEntry[] = [
       {
         ...catalog[0],
@@ -845,7 +915,7 @@ describe("runCostHarness", () => {
     assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-RULE-THROUGHPUT"));
   });
 
-  it("fails physical throughput when P95 only fits burst capability", () => {
+  it("CO-ADV-016: fails physical throughput when P95 only fits burst capability", () => {
     const throughputCatalog: InstanceCatalogEntry[] = [
       {
         ...catalog[0],
@@ -883,7 +953,7 @@ describe("runCostHarness", () => {
     assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-RULE-THROUGHPUT"));
   });
 
-  it("accepts blocked results only when blockers are explained", () => {
+  it("CO-ADV-017: accepts blocked results only when blockers are explained", () => {
     const findings = runCostHarness({
       result: {
         currentConfig,
@@ -916,7 +986,7 @@ describe("runCostHarness", () => {
     assertHarnessPassed(findings);
   });
 
-  it("fails when recommended size underfits memory, IOPS, or throughput", () => {
+  it("CO-ADV-018: fails when recommended size underfits memory, IOPS, or throughput", () => {
     const findings = runCostHarness({
       result: validResult({ recommendedConfig: { ...currentConfig, instanceClass: "db.m8i.2xlarge" } }),
       workload,
@@ -935,7 +1005,7 @@ describe("runCostHarness", () => {
     assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-I-THROUGHPUT-FIT"));
   });
 
-  it("does not fail server-level validation when database attribution evidence is unavailable", () => {
+  it("CO-ADV-019: does not fail server-level validation when database attribution evidence is unavailable", () => {
     const serverOnlyWorkload: WorkloadProfile = {
       ...workload,
       databases: [{ databaseName: "server-level-only" }]
@@ -958,7 +1028,7 @@ describe("runCostHarness", () => {
     ));
   });
 
-  it("fails when caller says SSATWeb sizing engine was used", () => {
+  it("CO-ADV-020: fails when caller says SSATWeb sizing engine was used", () => {
     const findings = runCostHarness({
       result: validResult(),
       workload,
@@ -976,7 +1046,7 @@ describe("runCostHarness", () => {
     assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-J-INDEPENDENT-SIZING"));
   });
 
-  it("fails when SQL edition and license model combination is invalid", () => {
+  it("CO-ADV-021: fails when SQL edition and license model combination is invalid", () => {
     const invalidConfig: CurrentRdsConfig = {
       ...currentConfig,
       sqlServerEdition: "Web",
@@ -1001,7 +1071,7 @@ describe("runCostHarness", () => {
     assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-B-LICENSE-MODEL-VALID"));
   });
 
-  it("blocks Enterprise to Standard edition changes without an explicit eligibility audit", () => {
+  it("CO-ADV-022: blocks Enterprise to Standard edition changes without an explicit eligibility audit", () => {
     const enterpriseConfig: CurrentRdsConfig = {
       ...currentConfig,
       sqlServerEdition: "Enterprise"
@@ -1025,7 +1095,7 @@ describe("runCostHarness", () => {
     assert.ok(findings.some((finding) => !finding.passed && finding.oracle === "CO-C-EE-TO-SE-ELIGIBILITY"));
   });
 
-  it("allows Enterprise to Standard edition changes when eligibility audit passes", () => {
+  it("CO-ADV-023: allows Enterprise to Standard edition changes when eligibility audit passes", () => {
     const enterpriseConfig: CurrentRdsConfig = {
       ...currentConfig,
       sqlServerEdition: "Enterprise"
@@ -1059,7 +1129,7 @@ describe("runCostHarness", () => {
     assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-C-EE-TO-SE-ELIGIBILITY"));
   });
 
-  it("keeps retired Enterprise-to-Standard oracle out of the active harness scope", () => {
+  it("CO-ADV-024: keeps retired Enterprise-to-Standard oracle out of the active harness scope", () => {
     const enterpriseConfig: CurrentRdsConfig = {
       ...currentConfig,
       sqlServerEdition: "Enterprise"
@@ -1114,7 +1184,7 @@ describe("runCostHarness", () => {
     assert.ok(findings.every((finding) => finding.oracle !== "CO-14-EDITION"));
   });
 
-  it("uses preserved active I/O evidence instead of the retired raw interval oracle", () => {
+  it("CO-ADV-025: uses preserved active I/O evidence instead of the retired raw interval oracle", () => {
     const reproducibleWorkload = productionWorkload({
       sqlCpuPct: 20,
       currentMemoryGb: 256,
@@ -1173,7 +1243,7 @@ describe("runCostHarness", () => {
     assert.ok(findings.some((finding) => finding.passed && finding.oracle === "CO-RULE-THROUGHPUT"));
   });
 
-  it("fails unsupported ARM/Graviton-style instance families", () => {
+  it("CO-ADV-026: fails unsupported ARM/Graviton-style instance families", () => {
     const armCatalog: InstanceCatalogEntry[] = [
       ...catalog,
       {
@@ -1228,7 +1298,7 @@ describe("runCostHarness", () => {
   ];
 
   for (const scenario of cpuScenarios) {
-    it(`independently validates CPU classification for ${scenario.name}`, () => {
+    it(`CO-ADV-027: independently validates CPU classification for ${scenario.name}`, () => {
       const scenarioWorkload = workloadFromCpuSamples(scenario.samples);
       const result = optimizeCpuScenario(scenarioWorkload);
       const findings = runCostHarness({
@@ -1250,7 +1320,7 @@ describe("runCostHarness", () => {
     });
   }
 
-  it("fails CO-L when the reported CPU state disagrees with the independent oracle", () => {
+  it("CO-ADV-028: fails CO-L when the reported CPU state disagrees with the independent oracle", () => {
     const scenarioWorkload = workloadFromCpuSamples(Array.from({ length: 20 }, () => 20));
     const result = {
       ...optimizeCpuScenario(scenarioWorkload),

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engagement Findings — Meridian Data Advisory</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="masthead">
+  <div class="bar">
+    <a class="wordmark" href="index.html">Meridian&nbsp;Data Advisory<small>RDS SQL Server Cost Optimization</small></a>
+    <nav class="nav" aria-label="Primary">
+      <a href="index.html">Overview</a>
+      <a href="approach.html">Approach</a>
+      <a href="results.html" aria-current="page">Findings</a>
+      <a href="#">Perspectives</a>
+      <a class="cta" href="assessment.html">Begin engagement <span class="arrow">&rarr;</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" style="padding-bottom:28px">
+    <div class="container hero-grid">
+      <div>
+        <p class="eyebrow">Engagement findings · Northwind Trading</p>
+        <h1>Fleet optimization decision.</h1>
+        <p class="lead">Three SQL Server workloads assessed. Pricing is not included this phase; export the full evidence package for engineering and finance.</p>
+        <div class="actions"><a class="cta solid" href="#">Export PDF <span class="arrow">&rarr;</span></a><a class="cta" href="#">CSV</a><a class="cta" href="#">JSON</a></div>
+      </div>
+      <figure class="visual" aria-label="Fleet mix" style="margin:0">
+        <div class="vhead"><span>Fleet mix</span><span>3 servers</span></div>
+        <div class="vbody">
+          <div class="donut" style="--v:33" role="img" aria-label="One recommended, one aggressive, one hold">
+            <div class="hole"><div><b>2/3</b><span>can move</span></div></div>
+          </div>
+          <div class="legend">
+            <div class="gauge"><label>Recommended</label><div class="track"><div class="fill" style="width:33%"></div></div><b>1</b></div>
+            <div class="gauge"><label>Aggressive</label><div class="track"><div class="fill warn" style="width:33%"></div></div><b>1</b></div>
+            <div class="gauge"><label>Stay as is</label><div class="track"><div class="fill danger" style="width:33%"></div></div><b>1</b></div>
+          </div>
+        </div>
+        <figcaption class="vfoot"><span>Estimated monthly footprint reduction</span><b class="serif" style="font-size:16px">~38%</b></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <div class="section-index"><span class="no">01</span><h2>Server findings</h2></div>
+
+      <article class="finding">
+        <div>
+          <h3 style="font-size:20px;margin:0">orders-prod-01</h3>
+          <p class="move">db.r8i.16xlarge &rarr; db.r8i.12xlarge · medium confidence (7-day window)</p>
+          <div class="gauges">
+            <div class="gauge"><label>CPU p95</label><div class="track"><div class="fill" style="width:18%"></div></div><b>18%</b></div>
+            <div class="gauge"><label>Memory</label><div class="track"><div class="fill" style="width:60%"></div></div><b>232 GB</b></div>
+            <div class="gauge"><label>IOPS p95</label><div class="track"><div class="fill" style="width:18%"></div></div><b>11k</b></div>
+            <div class="gauge"><label>Throughput</label><div class="track"><div class="fill" style="width:14%"></div></div><b>270</b></div>
+          </div>
+        </div>
+        <span class="tag ok">Recommended</span>
+      </article>
+
+      <article class="finding">
+        <div>
+          <h3 style="font-size:20px;margin:0">analytics-prod-02</h3>
+          <p class="move">db.r6i.16xlarge &rarr; db.x2m.8xlarge · high confidence (14-day window) · review before applying</p>
+          <div class="gauges">
+            <div class="gauge"><label>CPU p95</label><div class="track"><div class="fill" style="width:12%"></div></div><b>12%</b></div>
+            <div class="gauge"><label>Memory</label><div class="track"><div class="fill" style="width:40%"></div></div><b>150 GB</b></div>
+            <div class="gauge"><label>IOPS p95</label><div class="track"><div class="fill" style="width:9%"></div></div><b>4.2k</b></div>
+            <div class="gauge"><label>Evidence</label><div class="track"><div class="fill" style="width:100%"></div></div><b>14d</b></div>
+          </div>
+        </div>
+        <span class="tag warn">Aggressive</span>
+      </article>
+
+      <article class="finding">
+        <div>
+          <h3 style="font-size:20px;margin:0">txn-prod-03</h3>
+          <p class="move">Keep db.r8i.16xlarge · blocked by physical IOPS demand</p>
+          <div class="gauges">
+            <div class="gauge"><label>CPU p95</label><div class="track"><div class="fill" style="width:22%"></div></div><b>22%</b></div>
+            <div class="gauge"><label>IOPS p95</label><div class="track"><div class="fill danger" style="width:96%"></div></div><b>50k</b></div>
+            <div class="gauge"><label>Throughput</label><div class="track"><div class="fill warn" style="width:78%"></div></div><b>1.9k</b></div>
+            <div class="gauge"><label>Evidence</label><div class="track"><div class="fill" style="width:100%"></div></div><b>7d</b></div>
+          </div>
+        </div>
+        <span class="tag stay">Stay as is</span>
+      </article>
+    </div>
+  </section>
+
+  <section class="statement">
+    <div class="container" style="display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap">
+      <blockquote style="font-size:clamp(22px,3vw,32px)">Two of three workloads can move. One should not — and we show why.</blockquote>
+      <a class="cta on-dark" href="#">Export full package <span class="arrow">&rarr;</span></a>
+    </div>
+  </section>
+</main>
+
+<footer class="colophon">
+  <div class="container">
+    <div><p class="brand">Meridian Data Advisory</p><p class="muted" style="margin:.6em 0 0;max-width:40ch">Evidence-led cost optimization for RDS SQL Server. We advise; you decide.</p></div>
+    <div><h4>This report</h4><ul><li><a href="#">Export PDF</a></li><li><a href="#">Export CSV</a></li><li><a href="#">Export JSON</a></li></ul></div>
+    <div><h4>Legend</h4><ul><li class="muted">Recommended — safe downsize</li><li class="muted">Aggressive — review first</li><li class="muted">Stay as is — keep current</li></ul></div>
+  </div>
+  <div class="container"><p class="fine">Prototype — consulting design direction. Figures are illustrative.</p></div>
+</footer>
+</body>
+</html>

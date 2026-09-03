@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "description": "Approved candidate family preference metadata for RDS SQL Server workload optimization. Lower rank wins. These mutable AWS/business preference facts are intentionally catalog-adjacent rather than embedded in optimizer or harness code.",
+  "families": [
+    {
+      "family": "m8i",
+      "role": "lead",
+      "rank": 0
+    },
+    {
+      "family": "r8i",
+      "role": "lead",
+      "rank": 0
+    },
+    {
+      "family": "x2m",
+      "role": "lead",
+      "rank": 0
+    },
+    {
+      "family": "m7i",
+      "role": "fallback",
+      "rank": 1
+    },
+    {
+      "family": "r7i",
+      "role": "fallback",
+      "rank": 1
+    },
+    {
+      "family": "x2iedn",
+      "role": "fallback",
+      "rank": 1
+    }
+  ]
+}

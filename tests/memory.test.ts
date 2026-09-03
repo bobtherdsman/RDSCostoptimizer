@@ -135,7 +135,7 @@ function couplingWorkload(options: {
 }
 
 describe("memory pressure and less-elastic working-set floor", () => {
-  it("does not treat high committed memory as the standalone RAM requirement", () => {
+  it("ENG-MEMORY-001: does not treat high committed memory as the standalone RAM requirement", () => {
     const memorySamples = [sample(0), sample(1), sample(2)];
     const evidence = buildMemoryEvidenceFromSamples(memorySamples);
     const evaluation = evaluateCandidateMemory({
@@ -151,7 +151,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.equal(evaluation.pressureState, "no_direct_pressure_detected");
   });
 
-  it("treats one isolated low-memory event as warning context", () => {
+  it("ENG-MEMORY-002: treats one isolated low-memory event as warning context", () => {
     const memorySamples = Array.from({ length: 100 }, (_, index) =>
       sample(index, index === 50 ? { processPhysicalMemoryLow: true } : {})
     );
@@ -169,7 +169,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.deepEqual(evaluation.failures, []);
   });
 
-  it("blocks a RAM reduction when low-memory pressure is repeated", () => {
+  it("ENG-MEMORY-003: blocks a RAM reduction when low-memory pressure is repeated", () => {
     const memorySamples = Array.from({ length: 100 }, (_, index) =>
       sample(index, index >= 10 && index < 20 ? { processPhysicalMemoryLow: true } : {})
     );
@@ -184,7 +184,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.ok(evaluation.failures.some((failure) => failure.startsWith("MEMORY_PRESSURE_DETECTED")));
   });
 
-  it("blocks a RAM reduction when Memory Grants Pending is sustained", () => {
+  it("ENG-MEMORY-004: blocks a RAM reduction when Memory Grants Pending is sustained", () => {
     const memorySamples = Array.from({ length: 100 }, (_, index) =>
       sample(index, index >= 20 ? { memoryGrantsPending: 1 } : {})
     );
@@ -199,7 +199,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.ok(evaluation.failures.some((failure) => failure.startsWith("MEMORY_PRESSURE_DETECTED")));
   });
 
-  it("blocks a candidate below the less-elastic floor with 20 percent headroom", () => {
+  it("ENG-MEMORY-005: blocks a candidate below the less-elastic floor with 20 percent headroom", () => {
     const memorySamples = [sample(0), sample(1), sample(2)];
     const evaluation = evaluateCandidateMemory({
       workload: workload(memorySamples),
@@ -211,7 +211,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.ok(evaluation.failures.some((failure) => failure.startsWith("MEMORY_LESS_ELASTIC_FLOOR_UNDERFIT")));
   });
 
-  it("preserves low-tail, NUMA, grants, cache, and page-activity evidence", () => {
+  it("ENG-MEMORY-006: preserves low-tail, NUMA, grants, cache, and page-activity evidence", () => {
     const evidence = buildMemoryEvidenceFromSamples([
       sample(0, { osAvailableMemoryMb: 13107.2 }),
       sample(1, { osAvailableMemoryMb: 26214.4 }),
@@ -228,7 +228,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.equal(evidence?.evidenceConfidence, "high");
   });
 
-  it("downgrades memory confidence when a required signal is incomplete across the window", () => {
+  it("ENG-MEMORY-007: downgrades memory confidence when a required signal is incomplete across the window", () => {
     const evidence = buildMemoryEvidenceFromSamples([
       sample(0),
       sample(1, { numaPleJson: undefined })
@@ -237,7 +237,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.equal(evidence?.evidenceConfidence, "medium");
   });
 
-  it("classifies a clean seven-day multi-signal trend as a stable working set", () => {
+  it("ENG-MEMORY-008: classifies a clean seven-day multi-signal trend as a stable working set", () => {
     const evaluation = evaluateMemoryToIoCoupling({
       workload: couplingWorkload({ isolatedLazyWrite: true }),
       currentMemoryGb: 128,
@@ -255,7 +255,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.equal(evaluation.readIopsWorkloadNormalized, false);
   });
 
-  it("classifies persistent 40 percent ReadIOPS pressure coupling as strong", () => {
+  it("ENG-MEMORY-009: classifies persistent 40 percent ReadIOPS pressure coupling as strong", () => {
     const evaluation = evaluateMemoryToIoCoupling({
       workload: couplingWorkload({ risingPressureAndReads: true }),
       currentMemoryGb: 128,
@@ -272,7 +272,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.equal(evaluation.readIopsPersistenceMet, true);
   });
 
-  it("treats correlation above 0.40 with less than 20 percent magnitude as weak", () => {
+  it("ENG-MEMORY-010: treats correlation above 0.40 with less than 20 percent magnitude as weak", () => {
     const evaluation = evaluateMemoryToIoCoupling({
       workload: couplingWorkload({
         risingPressureAndReads: true,
@@ -289,7 +289,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.equal(evaluation.readIopsPressureRelationship, "weak");
   });
 
-  it("classifies a persistent 20 to 40 percent increase as meaningful", () => {
+  it("ENG-MEMORY-011: classifies a persistent 20 to 40 percent increase as meaningful", () => {
     const evaluation = evaluateMemoryToIoCoupling({
       workload: couplingWorkload({
         risingPressureAndReads: true,
@@ -307,7 +307,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.equal(evaluation.readIopsPersistenceMet, true);
   });
 
-  it("normalizes ReadIOPS by Batch Requests per second when every valid sample has it", () => {
+  it("ENG-MEMORY-012: normalizes ReadIOPS by Batch Requests per second when every valid sample has it", () => {
     const evaluation = evaluateMemoryToIoCoupling({
       workload: couplingWorkload({
         risingPressureAndReads: true,
@@ -324,7 +324,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.equal(evaluation.readIopsPressureRelationship, "not_rising");
   });
 
-  it("derives actual Batch Requests per second from cumulative counters before normalization", () => {
+  it("ENG-MEMORY-013: derives actual Batch Requests per second from cumulative counters before normalization", () => {
     const evaluation = evaluateMemoryToIoCoupling({
       workload: couplingWorkload({
         risingPressureAndReads: true,
@@ -341,7 +341,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.equal(evaluation.readIopsPressureRelationship, "not_rising");
   });
 
-  it("downgrades incomplete evidence and does not use Buffer Cache Hit Ratio alone", () => {
+  it("ENG-MEMORY-014: downgrades incomplete evidence and does not use Buffer Cache Hit Ratio alone", () => {
     const evaluation = evaluateMemoryToIoCoupling({
       workload: couplingWorkload({ omitCacheMetrics: true }),
       currentMemoryGb: 128,
@@ -355,7 +355,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.ok(evaluation.missingMetrics.includes("Buffer Cache Hit Ratio"));
   });
 
-  it("does not classify RAM reduction as stable when required memory evidence is incomplete", () => {
+  it("ENG-MEMORY-015: does not classify RAM reduction as stable when required memory evidence is incomplete", () => {
     const testWorkload = couplingWorkload();
     const incompleteSamples = testWorkload.sampleSeries!.memory.map((memorySample) => ({
       ...memorySample,
@@ -385,7 +385,7 @@ describe("memory pressure and less-elastic working-set floor", () => {
     assert.ok(evaluation.missingMetrics.includes("Complete required memory evidence"));
   });
 
-  it("requires coupling only for a 25 percent reduction or lower-memory family change", () => {
+  it("ENG-MEMORY-016: requires coupling only for a 25 percent reduction or lower-memory family change", () => {
     const notMaterial = evaluateMemoryToIoCoupling({
       workload: couplingWorkload(),
       currentMemoryGb: 128,

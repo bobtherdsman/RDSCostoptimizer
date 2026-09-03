@@ -114,7 +114,7 @@ function workloadWithPhysical(values: number[], throughputValues = values.map(()
 }
 
 describe("physical IOPS calculation", () => {
-  it("requires cumulative physical evidence instead of using a maximum-only fallback", () => {
+  it("ENG-IO-001: requires cumulative physical evidence instead of using a maximum-only fallback", () => {
     const zero: MetricDistribution = { avg: 0, p50: 0, p90: 0, p95: 0, p99: 0, max: 0 };
     const workload: WorkloadProfile = {
       collectionHours: 168,
@@ -140,7 +140,7 @@ describe("physical IOPS calculation", () => {
     assert.ok(throughput.failures.some((failure) => failure.startsWith("THROUGHPUT_PHYSICAL_EVIDENCE_REQUIRED")));
   });
 
-  it("uses actual elapsed time and aggregates files before calculating percentiles", () => {
+  it("ENG-IO-002: uses actual elapsed time and aggregates files before calculating percentiles", () => {
     const evidence = buildPhysicalIoEvidence([
       cumulativeSample({ minute: 0, databaseId: 5, databaseName: "orders", fileId: 1, reads: 100, writes: 50, valid: false }),
       cumulativeSample({ minute: 0, databaseId: 5, databaseName: "orders", fileId: 2, reads: 200, writes: 80, valid: false }),
@@ -162,7 +162,7 @@ describe("physical IOPS calculation", () => {
     assert.equal(evidence.totalMibPerSec.p95, 4.5);
   });
 
-  it("rejects the complete synchronized sample when any file counter resets", () => {
+  it("ENG-IO-003: rejects the complete synchronized sample when any file counter resets", () => {
     const evidence = buildPhysicalIoEvidence([
       cumulativeSample({ minute: 0, databaseId: 5, databaseName: "orders", fileId: 1, reads: 100, valid: false }),
       cumulativeSample({ minute: 0, databaseId: 5, databaseName: "orders", fileId: 2, reads: 100, valid: false }),
@@ -179,7 +179,7 @@ describe("physical IOPS calculation", () => {
     assert.equal(evidence.rejectedSampleCount, 2);
   });
 
-  it("rejects the complete synchronized sample when an expected file is missing", () => {
+  it("ENG-IO-004: rejects the complete synchronized sample when an expected file is missing", () => {
     const evidence = buildPhysicalIoEvidence([
       cumulativeSample({ minute: 0, databaseId: 5, databaseName: "orders", fileId: 1, reads: 100, valid: false }),
       cumulativeSample({ minute: 0, databaseId: 5, databaseName: "orders", fileId: 2, reads: 100, valid: false }),
@@ -195,7 +195,7 @@ describe("physical IOPS calculation", () => {
     assert.equal(evidence.rejectedSampleCount, 2);
   });
 
-  it("does not sum independent database P95 values", () => {
+  it("ENG-IO-005: does not sum independent database P95 values", () => {
     const samples: DatabaseIoWorkloadSample[] = [];
     let readsA = 0;
     let readsB = 0;
@@ -218,7 +218,7 @@ describe("physical IOPS calculation", () => {
     assert.equal(evidence.totalIops.p95, 100);
   });
 
-  it("fails P95 and P99 above effective capability headroom", () => {
+  it("ENG-IO-006: fails P95 and P99 above effective capability headroom", () => {
     const sustainedUsesBaseline = evaluateCandidateIops({
       workload: workloadWithPhysical(Array.from({ length: 100 }, () => 120)),
       baselineIops: 150,
@@ -259,7 +259,7 @@ describe("physical IOPS calculation", () => {
     assert.ok(burstFailure.failures.some((failure) => failure.startsWith("IOPS_P99_EFFECTIVE_CAPABILITY_EXCEEDED")));
   });
 
-  it("requires known burst duration and frequency behavior before relying on maximum IOPS", () => {
+  it("ENG-IO-007: requires known burst duration and frequency behavior before relying on maximum IOPS", () => {
     const values = [
       ...Array.from({ length: 96 }, () => 100),
       ...Array.from({ length: 4 }, () => 200)
@@ -303,7 +303,7 @@ describe("physical IOPS calculation", () => {
     assert.ok(frequencyFailure.failures.some((failure) => failure.startsWith("IOPS_BURST_FREQUENCY_EXCEEDED")));
   });
 
-  it("treats an isolated raw IOPS maximum above capability as context", () => {
+  it("ENG-IO-008: treats an isolated raw IOPS maximum above capability as context", () => {
     const evaluation = evaluateCandidateIops({
       workload: workloadWithPhysical([
         ...Array.from({ length: 99 }, () => 100),
@@ -320,7 +320,7 @@ describe("physical IOPS calculation", () => {
     assert.deepEqual(evaluation.failures, []);
   });
 
-  it("validates throughput P95 and P99 independently from IOPS", () => {
+  it("ENG-IO-009: validates throughput P95 and P99 independently from IOPS", () => {
     const sustainedUsesBaseline = evaluateCandidateThroughput({
       workload: workloadWithPhysical(
         Array.from({ length: 100 }, () => 10),
@@ -367,7 +367,7 @@ describe("physical IOPS calculation", () => {
     assert.ok(burstFailure.failures.some((failure) => failure.startsWith("THROUGHPUT_P99_EFFECTIVE_CAPABILITY_EXCEEDED")));
   });
 
-  it("requires known throughput burst behavior and ignores an isolated raw maximum", () => {
+  it("ENG-IO-010: requires known throughput burst behavior and ignores an isolated raw maximum", () => {
     const burstValues = [...Array.from({ length: 96 }, () => 100), ...Array.from({ length: 4 }, () => 200)];
     const unknown = evaluateCandidateThroughput({
       workload: workloadWithPhysical(Array.from({ length: 100 }, () => 10), burstValues),
@@ -401,7 +401,7 @@ describe("physical IOPS calculation", () => {
     assert.deepEqual(isolatedMaximum.failures, []);
   });
 
-  it("remaps all four candidate-aware tempdb placement transitions before percentiles", () => {
+  it("ENG-IO-011: remaps all four candidate-aware tempdb placement transitions before percentiles", () => {
     const evidence = physicalEvidence(
       Array.from({ length: 100 }, () => 120),
       Array.from({ length: 100 }, () => 12),
@@ -461,7 +461,7 @@ describe("physical IOPS calculation", () => {
     assert.equal(nvmeToNon.candidateNormalPath?.totalMibPerSec.p95, 12);
   });
 
-  it("hard-blocks local NVMe when representative or peak tempdb allocation exceeds capacity", () => {
+  it("ENG-IO-012: hard-blocks local NVMe when representative or peak tempdb allocation exceeds capacity", () => {
     const evaluation = evaluateCandidateTempdbPlacement({
       physicalIo: physicalEvidence([120], [12], [40], [4]),
       currentTempdbOnLocalStorage: false,
@@ -477,7 +477,7 @@ describe("physical IOPS calculation", () => {
     assert.ok(evaluation.failures.some((failure) => failure.startsWith("TEMPDB_LOCAL_CAPACITY_EXCEEDED")));
   });
 
-  it("hard-blocks local NVMe when capacity or representative and peak allocation evidence is missing", () => {
+  it("ENG-IO-013: hard-blocks local NVMe when capacity or representative and peak allocation evidence is missing", () => {
     const missingCapacity = evaluateCandidateTempdbPlacement({
       physicalIo: physicalEvidence([120], [12], [40], [4]),
       currentTempdbOnLocalStorage: false,

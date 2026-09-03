@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Optimization Guide — RDS SQL Server Cost Optimization</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="header">
+  <div class="nav">
+    <a class="brand" href="overview.html"><span class="mark">RDS</span><span>Cost Optimization<small>Optimization guide</small></span></a>
+    <nav class="menu" aria-label="Primary">
+      <a href="overview.html">Overview</a>
+      <a href="services.html">Services</a>
+      <a href="resources.html" aria-current="page">Resources</a>
+      <a href="#">About</a>
+      <a class="btn primary" href="assessment.html">Start assessment</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <section class="hero">
+    <div>
+      <p class="kicker">Optimization guide</p>
+      <h1>How the workload-fit decision is made.</h1>
+      <p>The service turns collector evidence into a defensible business decision. Here is what it measures, the guardrails it enforces, and how to read a result.</p>
+    </div>
+    <aside class="summary-card" aria-label="At a glance">
+      <p class="kicker">At a glance</p>
+      <dl>
+        <dt>Method</dt><dd>Evidence-led</dd>
+        <dt>Engine</dt><dd>SQL Server only</dd>
+        <dt>Window</dt><dd>48h min · 7d+ preferred</dd>
+        <dt>Pricing</dt><dd>Deferred</dd>
+      </dl>
+    </aside>
+  </section>
+
+  <section class="grid c3">
+    <div class="panel feature"><h3>CPU</h3><p>Underutilized CPU is the primary downsize signal; projected CPU must fit the smaller instance at p95/p99.</p></div>
+    <div class="panel feature"><h3>Memory</h3><p>The memory floor (buffer pool + working set) must fit before recommending a smaller class.</p></div>
+    <div class="panel feature"><h3>I/O &amp; throughput</h3><p>Observed physical IOPS and throughput must fit the candidate's effective limits.</p></div>
+    <div class="panel feature"><h3>tempdb</h3><p>tempdb placement and capacity are assessed as part of the fit and top-driver view.</p></div>
+    <div class="panel feature"><h3>Edition &amp; orderability</h3><p>Enterprise→Standard eligibility and exact RDS orderability are checked for the target.</p></div>
+    <div class="panel feature"><h3>Evidence quality</h3><p>Window length and sample continuity set the confidence level of the result.</p></div>
+  </section>
+
+  <section class="panel" style="margin-top:24px">
+    <p class="kicker">Reading a result</p>
+    <h2 style="font-size:var(--step-h2)">Three outcomes</h2>
+    <div class="grid c3" style="margin-top:12px">
+      <div class="ev"><span class="chip ok">Recommended</span><p class="muted" style="margin:.6em 0 0">A safe like-for-like or in-family downsize; all gates fit.</p></div>
+      <div class="ev"><span class="chip warn">Aggressive</span><p class="muted" style="margin:.6em 0 0">A larger, cross-family move that fits the evidence but warrants review.</p></div>
+      <div class="ev"><span class="chip stay">Stay as is</span><p class="muted" style="margin:.6em 0 0">At least one dimension blocks a smaller candidate; keep the current class.</p></div>
+    </div>
+  </section>
+
+  <section class="panel" style="margin-top:16px">
+    <p class="kicker">Evidence window</p>
+    <h2 style="font-size:var(--step-h2)">Confidence scales with the window</h2>
+    <div class="evgrid" style="margin-top:12px">
+      <div class="ev"><span>&lt; 48h</span><strong>Insufficient</strong></div>
+      <div class="ev"><span>48–72h</span><strong>Below preliminary</strong></div>
+      <div class="ev"><span>3–7 days</span><strong>Preliminary</strong></div>
+      <div class="ev"><span>7–14 days</span><strong>Minimum · medium</strong></div>
+      <div class="ev"><span>14–30 days</span><strong>Preferred · high</strong></div>
+      <div class="ev"><span>30–32 days</span><strong>Monthly cycle · high</strong></div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="inner">
+    <div><strong>RDS SQL Server Cost Optimization</strong><p class="muted" style="margin:.4em 0 0;max-width:34ch">Evidence-led workload-fit decisions. No customer data is modified.</p></div>
+    <div><strong>Scope</strong><ul><li>RDS for SQL Server</li><li>Collector-first evidence</li><li>Pricing deferred</li></ul></div>
+    <div><strong>Safeguards</strong><ul><li>No automatic RDS changes</li><li>Bounded, low-impact collection</li><li>Owner-approved access</li></ul></div>
+  </div>
+</footer>
+</body>
+</html>
