@@ -6,8 +6,19 @@ import type {
   WorkloadProfile
 } from "../contracts/types.js";
 import { distribution } from "../parser/stats.js";
+import {
+  READ_IOPS_MIN_PRESSURE_PERIOD_SAMPLES,
+  READ_IOPS_MIN_PRESSURE_PERIODS,
+  READ_IOPS_PERSISTENCE_SAMPLE_PCT
+} from "./coupling.js";
 
 export const MEMORY_HEADROOM_PCT = 20;
+
+type DirectMemoryPressureState =
+  | "pressure_detected"
+  | "isolated_pressure_detected"
+  | "no_direct_pressure_detected"
+  | "insufficient_evidence";
 
 type MemorySignalCheck = readonly [string, (sample: MemoryWorkloadSample) => boolean];
 
@@ -48,7 +59,7 @@ export interface MemoryCandidateEvaluation {
   candidateMemoryGb: number;
   memoryReductionPct?: number;
   requiredMemoryFloorGb?: number;
-  pressureState: "pressure_detected" | "no_direct_pressure_detected" | "insufficient_evidence";
+  pressureState: DirectMemoryPressureState;
   evidenceConfidence: "high" | "medium" | "low";
   workingSetValidationRequired: boolean;
   signalsUsed: string[];
@@ -103,7 +114,7 @@ export function buildMemoryEvidenceFromSamples(samples: readonly MemoryWorkloadS
   const requiredMemoryFloorGb = lessElastic.length > 0
     ? round2(distribution(lessElastic).p95 * (1 + MEMORY_HEADROOM_PCT / 100) / 1024)
     : undefined;
-  const pressureSignals = directPressureSignals(samples);
+  const pressureAssessment = directPressureAssessment(samples);
   const evidenceCompleteness = availableSignals(samples);
   const evidenceConfidence = memoryEvidenceConfidence(samples);
   const observedSqlMemoryMb = maximum([
@@ -167,7 +178,8 @@ export function buildMemoryEvidenceFromSamples(samples: readonly MemoryWorkloadS
     evidenceConfidence,
     evidenceCompleteness,
     workingSetValidationRequired: true,
-    pressureSignals
+    directPressureState: pressureAssessment.state,
+    pressureSignals: pressureAssessment.signals
   };
 }
 
@@ -181,10 +193,11 @@ export function evaluateCandidateMemory(input: {
     ?? buildMemoryEvidenceFromSamples(input.workload.sampleSeries?.memory ?? []);
   const pressureState = !evidence
     ? "insufficient_evidence"
-    : evidence.pressureSignals.length > 0
-      ? "pressure_detected"
-      : "no_direct_pressure_detected";
-  const evidenceConfidence = evidence?.evidenceConfidence ?? "low";
+    : evidence.directPressureState
+      ?? directPressureAssessment(input.workload.sampleSeries?.memory ?? []).state;
+  const evidenceConfidence = pressureState === "isolated_pressure_detected" && evidence?.evidenceConfidence === "high"
+    ? "medium"
+    : evidence?.evidenceConfidence ?? "low";
   const currentMemoryGb = input.currentMemoryGb
     ?? (evidence?.osTotalMemoryMb !== undefined ? evidence.osTotalMemoryMb / 1024 : undefined);
   const memoryReductionPct = currentMemoryGb && currentMemoryGb > 0
@@ -223,22 +236,110 @@ export function evaluateCandidateMemory(input: {
   };
 }
 
-function directPressureSignals(samples: readonly MemoryWorkloadSample[]): string[] {
-  const signals: string[] = [];
+function directPressureAssessment(samples: readonly MemoryWorkloadSample[]): {
+  state: DirectMemoryPressureState;
+  signals: string[];
+} {
+  if (samples.length === 0) {
+    return {
+      state: "insufficient_evidence",
+      signals: []
+    };
+  }
+
+  const blockingSignals: string[] = [];
+  const isolatedSignals: string[] = [];
   const grantsPending = values(samples, (sample) => sample.memoryGrantsPending);
-  if (grantsPending.length > 0 && distribution(grantsPending).p95 > 0) {
-    signals.push("Memory Grants Pending was above zero at P95.");
+  if (grantsPending.some((value) => value > 0)) {
+    const grantStats = pressurePersistence(samples, (sample) => (sample.memoryGrantsPending ?? 0) > 0);
+    if (distribution(grantsPending).p95 > 0 || pressurePersistenceMet(grantStats)) {
+      blockingSignals.push("Memory Grants Pending was sustained or repeated.");
+    } else {
+      isolatedSignals.push("Memory Grants Pending occurred only as an isolated event.");
+    }
   }
-  if (samples.some((sample) => sample.processPhysicalMemoryLow === true)) {
-    signals.push("SQL Server reported process physical-memory pressure.");
+
+  const physicalLowStats = pressurePersistence(samples, (sample) => sample.processPhysicalMemoryLow === true);
+  if (physicalLowStats.sampleCount > 0) {
+    if (pressurePersistenceMet(physicalLowStats)) {
+      blockingSignals.push("SQL Server reported repeated process physical-memory pressure.");
+    } else {
+      isolatedSignals.push("SQL Server reported an isolated process physical-memory pressure event.");
+    }
   }
-  if (samples.some((sample) => sample.processVirtualMemoryLow === true)) {
-    signals.push("SQL Server reported process virtual-memory pressure.");
+
+  const virtualLowStats = pressurePersistence(samples, (sample) => sample.processVirtualMemoryLow === true);
+  if (virtualLowStats.sampleCount > 0) {
+    if (pressurePersistenceMet(virtualLowStats)) {
+      blockingSignals.push("SQL Server reported repeated process virtual-memory pressure.");
+    } else {
+      isolatedSignals.push("SQL Server reported an isolated process virtual-memory pressure event.");
+    }
   }
-  if (samples.some((sample) => sample.systemLowMemorySignalState === true)) {
-    signals.push("The operating system reported a low-memory signal.");
+
+  const systemLowStats = pressurePersistence(samples, (sample) => sample.systemLowMemorySignalState === true);
+  if (systemLowStats.sampleCount > 0) {
+    if (pressurePersistenceMet(systemLowStats)) {
+      blockingSignals.push("The operating system reported repeated low-memory pressure.");
+    } else {
+      isolatedSignals.push("The operating system reported an isolated low-memory pressure event.");
+    }
   }
-  return signals;
+
+  if (blockingSignals.length > 0) {
+    return {
+      state: "pressure_detected",
+      signals: [...blockingSignals, ...isolatedSignals]
+    };
+  }
+  if (isolatedSignals.length > 0) {
+    return {
+      state: "isolated_pressure_detected",
+      signals: isolatedSignals
+    };
+  }
+  return {
+    state: "no_direct_pressure_detected",
+    signals: []
+  };
+}
+
+function pressurePersistence(
+  samples: readonly MemoryWorkloadSample[],
+  qualifies: (sample: MemoryWorkloadSample) => boolean
+): { sampleCount: number; samplePct: number; periodCount: number } {
+  const ordered = [...samples].sort((left, right) => left.timestampMs - right.timestampMs);
+  let sampleCount = 0;
+  let periodCount = 0;
+  let consecutiveSamples = 0;
+  let previousTimestampMs: number | undefined;
+
+  for (const sample of ordered) {
+    const qualified = qualifies(sample);
+    if (qualified) sampleCount += 1;
+    const consecutiveTimestamp =
+      previousTimestampMs === undefined
+      || sample.timestampMs - previousTimestampMs <= 60_000;
+    if (qualified && consecutiveTimestamp) {
+      consecutiveSamples += 1;
+    } else {
+      if (consecutiveSamples >= READ_IOPS_MIN_PRESSURE_PERIOD_SAMPLES) periodCount += 1;
+      consecutiveSamples = qualified ? 1 : 0;
+    }
+    previousTimestampMs = sample.timestampMs;
+  }
+  if (consecutiveSamples >= READ_IOPS_MIN_PRESSURE_PERIOD_SAMPLES) periodCount += 1;
+
+  return {
+    sampleCount,
+    samplePct: ordered.length > 0 ? sampleCount / ordered.length * 100 : 0,
+    periodCount
+  };
+}
+
+function pressurePersistenceMet(stats: { samplePct: number; periodCount: number }): boolean {
+  return stats.samplePct >= READ_IOPS_PERSISTENCE_SAMPLE_PCT
+    || stats.periodCount >= READ_IOPS_MIN_PRESSURE_PERIODS;
 }
 
 function lessElasticMemoryMb(sample: MemoryWorkloadSample): { totalMb: number; osNonSqlUsedMb: number } | undefined {

@@ -4,7 +4,7 @@ import { parseCsv } from "../src/parser/csv.js";
 import { normalizeExistingCollectorCsvs } from "../src/parser/index.js";
 
 describe("parseCsv", () => {
-  it("handles BOM, quoted headers, quoted commas, and escaped quotes", () => {
+  it("R12: handles BOM, quoted headers, quoted commas, and escaped quotes", () => {
     const rows = parseCsv('\uFEFF"Name","Value","Note"\n"app,db",42,"has ""quotes"""');
 
     assert.deepEqual(rows, [
@@ -155,7 +155,7 @@ describe("normalizeExistingCollectorCsvs", () => {
     ].join("\n");
   }
 
-  it("normalizes existing collector CPU, memory, IO, throughput, and DB attribution", () => {
+  it("R13: normalizes existing collector CPU, memory, IO, throughput, and DB attribution", () => {
     const profile = normalizeExistingCollectorCsvs({ cpuCsv, memoryCsv, ioCsv, storageCsv, dbCpuRequestCsv });
 
     assert.equal(profile.cpuPct.p95, 39);
@@ -194,7 +194,7 @@ describe("normalizeExistingCollectorCsvs", () => {
     assert.equal(profile.evidenceWindow?.representativeness, "customer_confirmation_required");
   });
 
-  it("adds advisory evidence from opt-in diagnostics without making hard blockers", () => {
+  it("R14: adds advisory evidence from opt-in diagnostics without making hard blockers", () => {
     const profile = normalizeExistingCollectorCsvs({
       cpuCsv,
       memoryCsv,
@@ -247,7 +247,7 @@ describe("normalizeExistingCollectorCsvs", () => {
     assert.equal(profile.evidence?.edition?.databases[0].memoryOptimizedAllocatedMb, 4096);
   });
 
-  it("normalizes consolidated Cost Optimization workload samples", () => {
+  it("R15: normalizes consolidated Cost Optimization workload samples", () => {
     const profile = normalizeExistingCollectorCsvs({
       cpuCsv,
       memoryCsv,
@@ -268,7 +268,7 @@ describe("normalizeExistingCollectorCsvs", () => {
     assert.equal(profile.evidence?.edition?.auditComplete, true);
   });
 
-  it("derives the memory floor from compact consolidated workload samples without legacy memory CSV", () => {
+  it("R16: derives the memory floor from compact consolidated workload samples without legacy memory CSV", () => {
     const profile = normalizeExistingCollectorCsvs({
       cpuCsv,
       workloadSamplesCsv: consolidatedWorkloadSamplesCsv(),
@@ -281,7 +281,7 @@ describe("normalizeExistingCollectorCsvs", () => {
     assert.equal(profile.evidence?.memory?.requiredMemoryFloorGb, 16.69);
   });
 
-  it("uses legacy memory facts to supplement older Cost Optimization samples with US collector timestamps", () => {
+  it("R17: uses legacy memory facts to supplement older Cost Optimization samples with US collector timestamps", () => {
     const profile = normalizeExistingCollectorCsvs({
       cpuCsv: withUsCollectorTimestamps(cpuCsv),
       memoryCsv: withUsCollectorTimestamps(memoryCsv),
@@ -295,7 +295,7 @@ describe("normalizeExistingCollectorCsvs", () => {
     assert.equal(profile.evidence?.memory?.requiredMemoryFloorGb, 15.08);
   });
 
-  it("does not duplicate Cost Optimization samples when consolidated and split files are both present", () => {
+  it("R18: does not duplicate Cost Optimization samples when consolidated and split files are both present", () => {
     const profile = normalizeExistingCollectorCsvs({
       cpuCsv,
       memoryCsv,
@@ -317,7 +317,7 @@ describe("normalizeExistingCollectorCsvs", () => {
     assert.equal(duplicateIssues.length, 0);
   });
 
-  it("ranks physical database drivers by time-integrated shares instead of independent P95", () => {
+  it("R19: ranks physical database drivers by time-integrated shares instead of independent P95", () => {
     const header = "ServerName,CollectionTime,DBName,database_id,file_id,type_desc,num_of_reads,num_of_writes,num_of_bytes_read,num_of_bytes_written,io_stall_read_ms,io_stall_write_ms";
     const rows = [header];
     let sustainedOperations = 0;
@@ -356,7 +356,7 @@ describe("normalizeExistingCollectorCsvs", () => {
     assert.deepEqual(profile.evidence?.topDatabasesByThroughput, ["sustained_db", "burst_db"]);
   });
 
-  it("preserves actual elapsed I/O time without replacing it with the collector cadence", () => {
+  it("R20: preserves actual elapsed I/O time without replacing it with the collector cadence", () => {
     const irregularIoCsv = [
       "ServerName,Sample_ID,Database_ID,DBName,Read,Written,BRead,BWritten,TotalB,TotalIOPs,Throuput,Netpackets,CollectionTime",
       "sql1,1,5,orders,10,5,1048576,524288,1572864,15,0,0,2026-08-28 00:00:00",
@@ -375,7 +375,7 @@ describe("normalizeExistingCollectorCsvs", () => {
     assert.equal(io[2].intervalValid, true);
   });
 
-  it("accepts summary IOPS and throughput aliases when cumulative file I/O is unavailable", () => {
+  it("R21: accepts summary IOPS and throughput aliases when cumulative file I/O is unavailable", () => {
     const summaryIopsCsv = [
       "ServerName,Sample_ID,DBName,IOPS,ThroughputMbps,CollectionTime",
       "sql1,1,orders,120,25,2026-08-28 00:00:00",
@@ -398,7 +398,7 @@ describe("normalizeExistingCollectorCsvs", () => {
     assert.equal(database.iops.p95, 234);
   });
 
-  it("records missing, duplicate, out-of-order, reset, and invalid samples", () => {
+  it("R22: records missing, duplicate, out-of-order, reset, and invalid samples", () => {
     const invalidCpuCsv = [
       "ServerName,SqlSerCpuUT,SystemIdle,OtherProCpuUT,Collectiontime",
       "sql1,20,70,10,2026-08-28 00:01:00",

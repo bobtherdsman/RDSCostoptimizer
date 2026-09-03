@@ -1,4 +1,5 @@
 import type {
+  CandidateEvaluationRecord,
   CurrentRdsConfig,
   DatabaseIoWorkloadSample,
   MemoryWorkloadSample,
@@ -7,10 +8,14 @@ import type {
   OptimizationResult,
   WorkloadProfile
 } from "../contracts/types.js";
-import type {
-  CandidateRequirements,
-  InstanceCatalogEntry,
-  OptimizeCpuConfiguration
+import {
+  familyPreferenceForFamily,
+  familyPreferenceRankForEntry,
+  familyPreferenceRoleForEntry,
+  type CandidateFamilyPreferenceRole,
+  type CandidateRequirements,
+  type InstanceCatalogEntry,
+  type OptimizeCpuConfiguration
 } from "../catalog/index.js";
 
 export interface IndependentOracleContext {
@@ -56,6 +61,8 @@ export function runIndependentRecommendationOracles(
 
   const findings = [
     activeCandidateEvidenceFinding(context),
+    optimalSafeCandidateFinding(context),
+    fallbackFamilyJustificationFinding(context),
     activeCpuProjectionFinding(context),
     activeMemoryFinding(context),
     activeIoFinding(context, "iops"),
@@ -71,6 +78,87 @@ export function runIndependentRecommendationOracles(
       : `Active rule flow could not be independently reproduced: ${failed.map((finding) => finding.oracle).join(", ")}.`
   });
   return findings;
+}
+
+function optimalSafeCandidateFinding(context: IndependentOracleContext): IndependentOracleFinding {
+  const recommended = context.result.recommendedConfig!;
+  const accepted = context.result.candidateEvaluations.filter((candidate) => candidate.accepted);
+  const selected = context.result.candidateEvaluations.find((candidate) => candidate.selected);
+  if (accepted.length === 0 || !selected) {
+    return finding(
+      "CO-RULE-OPTIMAL-SAFE-CANDIDATE",
+      "orderability",
+      false,
+      "Accepted candidate evidence and a selected candidate record are required to verify best-safe selection."
+    );
+  }
+
+  const best = [...accepted].sort((left, right) => compareSafeCandidateRecords(context, left, right))[0];
+  const passed = candidateRecordMatchesConfig(best, recommended)
+    && candidateRecordMatchesConfig(selected, recommended);
+
+  return finding(
+    "CO-RULE-OPTIMAL-SAFE-CANDIDATE",
+    "orderability",
+    passed,
+    passed
+      ? `Selected ${candidateRecordLabel(selected)} is the best independently ranked safe survivor among ${accepted.length} accepted candidate(s).`
+      : `Selected ${candidateRecordLabel(selected)} but independent safe-survivor ranking expected ${candidateRecordLabel(best)}.`
+  );
+}
+
+function fallbackFamilyJustificationFinding(context: IndependentOracleContext): IndependentOracleFinding {
+  const recommended = context.result.recommendedConfig!;
+  const selectedFamily = family(recommended.instanceClass);
+  if (familyPreferenceRoleForInstanceClass(context, recommended.instanceClass) !== "fallback") {
+    return finding(
+      "CO-RULE-FALLBACK-FAMILY-JUSTIFIED",
+      "orderability",
+      true,
+      `${recommended.instanceClass} is not a fallback-family selection.`
+    );
+  }
+
+  const selectedVisibleVcpu = recommended.sqlServerVisibleVcpu
+    ?? context.result.candidateEvaluations.find((candidate) => candidate.selected)?.sqlServerVisibleVcpu
+    ?? 0;
+  const orderableLeadClasses = context.catalog
+    .filter((entry) =>
+      familyPreferenceRoleForEntry(entry) === "lead"
+      && entry.vcpu > 0
+      && entry.vcpu <= selectedVisibleVcpu
+      && entry.vcpu < context.currentVcpu
+      && exactCatalogEntryForClass(context, entry.instanceClass) !== undefined
+    )
+    .map((entry) => entry.instanceClass);
+  const evaluatedLeadRecords = context.result.candidateEvaluations.filter((candidate) =>
+    familyPreferenceRoleForInstanceClass(context, candidate.instanceClass) === "lead"
+    && candidate.sqlServerVisibleVcpu <= selectedVisibleVcpu
+  );
+  const acceptedLead = evaluatedLeadRecords.find((candidate) => candidate.accepted);
+  const failedLead = evaluatedLeadRecords.find((candidate) =>
+    !candidate.accepted
+    && (
+      candidate.failedGates.length > 0
+      || candidate.limitingResources.some((resource) => resource.status === "blocking")
+    )
+  );
+  const orderableLeadSet = new Set(orderableLeadClasses);
+  const unevaluatedOrderableLead = [...orderableLeadSet].filter((instanceClass) =>
+    !evaluatedLeadRecords.some((candidate) => candidate.instanceClass === instanceClass)
+  );
+  const passed = acceptedLead === undefined
+    && (orderableLeadSet.size === 0 || failedLead !== undefined)
+    && unevaluatedOrderableLead.length === 0;
+
+  return finding(
+    "CO-RULE-FALLBACK-FAMILY-JUSTIFIED",
+    "orderability",
+    passed,
+    passed
+      ? `Fallback family ${selectedFamily} is justified: ${orderableLeadSet.size === 0 ? "no equal-or-better lead-family path is exactly orderable" : `lead path ${failedLead?.instanceClass ?? "unknown"} failed a preserved workload gate`}.`
+      : `Fallback family ${selectedFamily} is not justified: ${acceptedLead ? `lead candidate ${acceptedLead.instanceClass} was also accepted` : unevaluatedOrderableLead.length > 0 ? `orderable lead candidate(s) were not evaluated: ${unevaluatedOrderableLead.join(", ")}` : "no failed lead-family gate was preserved"}.`
+  );
 }
 
 function activeCandidateEvidenceFinding(context: IndependentOracleContext): IndependentOracleFinding {
@@ -90,6 +178,62 @@ function activeCandidateEvidenceFinding(context: IndependentOracleContext): Inde
     candidateExists && selectedMatches,
     `Recommended candidate=${recommended.instanceClass}; exact catalog row=${candidateExists ? "present" : "missing"}; selected record=${selected.map((candidate) => candidate.instanceClass).join(", ") || "none"}.`
   );
+}
+
+function compareSafeCandidateRecords(
+  context: IndependentOracleContext,
+  left: CandidateEvaluationRecord,
+  right: CandidateEvaluationRecord
+): number {
+  return left.sqlServerVisibleVcpu - right.sqlServerVisibleVcpu
+    || candidateFamilyTier(context, left) - candidateFamilyTier(context, right)
+    || candidateRiskRank(left) - candidateRiskRank(right)
+    || candidateMemoryRank(left, right)
+    || candidateConfigurationRank(left) - candidateConfigurationRank(right)
+    || left.instanceClass.localeCompare(right.instanceClass);
+}
+
+function candidateFamilyTier(context: IndependentOracleContext, candidate: CandidateEvaluationRecord): number {
+  const catalogEntry = context.catalog.find((entry) => entry.instanceClass === candidate.instanceClass);
+  if (catalogEntry) return familyPreferenceRankForEntry(catalogEntry);
+  return familyPreferenceForFamily(family(candidate.instanceClass)).rank;
+}
+
+function candidateRiskRank(candidate: CandidateEvaluationRecord): number {
+  const resourceRisk = candidate.limitingResources.some((resource) => resource.status === "risk") ? 1 : 0;
+  return (candidate.decision === "Recommended" ? 0 : 1) + resourceRisk;
+}
+
+function candidateMemoryRank(left: CandidateEvaluationRecord, right: CandidateEvaluationRecord): number {
+  return (right.candidateMemoryGb ?? 0) - (left.candidateMemoryGb ?? 0);
+}
+
+function candidateConfigurationRank(candidate: CandidateEvaluationRecord): number {
+  return candidate.cpuConfigurationType === "optimize_cpu" ? 0 : 1;
+}
+
+function candidateRecordMatchesConfig(
+  candidate: CandidateEvaluationRecord | undefined,
+  config: CurrentRdsConfig
+): boolean {
+  return candidate !== undefined
+    && candidate.instanceClass === config.instanceClass
+    && (config.sqlServerVisibleVcpu === undefined || candidate.sqlServerVisibleVcpu === config.sqlServerVisibleVcpu)
+    && candidate.cpuConfigurationType === (config.cpuConfigurationType ?? candidate.cpuConfigurationType);
+}
+
+function candidateRecordLabel(candidate: CandidateEvaluationRecord | undefined): string {
+  if (!candidate) return "none";
+  return `${candidate.instanceClass} ${candidate.cpuConfigurationType} ${candidate.sqlServerVisibleVcpu} visible vCPU`;
+}
+
+function familyPreferenceRoleForInstanceClass(
+  context: IndependentOracleContext,
+  instanceClass: string
+): CandidateFamilyPreferenceRole {
+  const catalogEntry = context.catalog.find((entry) => entry.instanceClass === instanceClass);
+  if (catalogEntry) return familyPreferenceRoleForEntry(catalogEntry);
+  return familyPreferenceForFamily(family(instanceClass)).role;
 }
 
 function activeCpuProjectionFinding(context: IndependentOracleContext): IndependentOracleFinding {
@@ -136,12 +280,13 @@ function activeCpuProjectionFinding(context: IndependentOracleContext): Independ
     && projectedSqlP95 <= 70
     && projectedSqlP99 <= 90
     && projectedTotalP99 <= 90;
+  const crossFamilyValidationRequired = evidence.cpuProjectionBasis === "unadjusted_cross_family";
 
   return finding(
     "CO-RULE-CPU",
     "cpu",
-    matches && fits,
-    `Projected SQL CPU P95/P99=${format(projectedSqlP95)}/${format(projectedSqlP99)}%; projected total CPU P99=${format(projectedTotalP99)}%; limits=70/90/90%.`
+    matches && fits && (!crossFamilyValidationRequired || context.result.decision !== "Recommended"),
+    `Projected SQL CPU P95/P99=${format(projectedSqlP95)}/${format(projectedSqlP99)}%; projected total CPU P99=${format(projectedTotalP99)}%; limits=70/90/90%; basis=${evidence.cpuProjectionBasis ?? "missing"}; validation required=${crossFamilyValidationRequired ? "yes" : "no"}; decision=${context.result.decision}.`
   );
 }
 
@@ -160,6 +305,7 @@ function activeMemoryFinding(context: IndependentOracleContext): IndependentOrac
   const floor = evidence.memoryRequiredFloorGb ?? context.requirements.memoryGb;
   const pressureState = evidence.memoryPressureState ?? "insufficient_evidence";
   const validationRequired = pressureState === "insufficient_evidence"
+    || pressureState === "isolated_pressure_detected"
     || evidence.memoryWorkingSetValidationRequired === true;
   const stableWorkingSet = evidence.memoryCouplingVerdict === "stable_working_set"
     || evidence.memoryCouplingVerdict === "not_required";
@@ -193,15 +339,19 @@ function activeIoFinding(
 
   const observedP95 = dimension === "iops" ? evidence.iopsP95 : evidence.throughputP95;
   const observedP99 = dimension === "iops" ? evidence.iopsP99 : evidence.throughputP99;
-  const candidateCapability = dimension === "iops"
-    ? (evidence.candidateBaselineIops ?? entry.baselineIops ?? entry.maxIops)
-    : (evidence.candidateBaselineThroughputMbps ?? entry.baselineThroughputMbps ?? entry.maxThroughputMbps);
+  const candidateSustainedCapability = dimension === "iops"
+    ? (evidence.candidateBaselineIops ?? entry.baselineIops)
+    : (evidence.candidateBaselineThroughputMbps ?? entry.baselineThroughputMbps);
+  const candidateBurstCapability = dimension === "iops"
+    ? (evidence.candidateMaximumIops ?? entry.maxIops)
+    : (evidence.candidateMaximumThroughputMbps ?? entry.maxThroughputMbps);
   const configuredCapability = dimension === "iops"
     ? context.currentConfig.provisionedIops
     : context.currentConfig.provisionedThroughputMbps;
-  const effectiveCapability = activeEffectiveCapability(candidateCapability, configuredCapability);
-  const p95Limit = effectiveCapability === undefined ? undefined : effectiveCapability * 0.70;
-  const p99Limit = effectiveCapability === undefined ? undefined : effectiveCapability * 0.90;
+  const effectiveSustainedCapability = activeEffectiveCapability(candidateSustainedCapability, configuredCapability);
+  const effectiveBurstCapability = activeEffectiveCapability(candidateBurstCapability, configuredCapability);
+  const p95Limit = effectiveSustainedCapability === undefined ? undefined : effectiveSustainedCapability * 0.70;
+  const p99Limit = effectiveBurstCapability === undefined ? undefined : effectiveBurstCapability * 0.90;
   const fits =
     observedP95 !== undefined
     && observedP99 !== undefined
@@ -214,7 +364,7 @@ function activeIoFinding(
     dimension === "iops" ? "CO-RULE-IOPS" : "CO-RULE-THROUGHPUT",
     dimension,
     fits,
-    `${dimension} P95/P99=${format(observedP95)}/${format(observedP99)}; effective capability=${format(effectiveCapability)}; limits=${format(p95Limit)}/${format(p99Limit)}.`
+    `${dimension} P95/P99=${format(observedP95)}/${format(observedP99)}; effective sustained/burst capability=${format(effectiveSustainedCapability)}/${format(effectiveBurstCapability)}; limits=${format(p95Limit)}/${format(p99Limit)}.`
   );
 }
 
@@ -382,17 +532,15 @@ function memoryFinding(context: IndependentOracleContext): IndependentOracleFind
   const reducing = currentMemoryGb === undefined || entry.memoryGb < currentMemoryGb;
   const fits = floorGb !== undefined
     && entry.memoryGb >= floorGb
-    && !(reducing && pressure.length > 0);
+    && !(reducing && pressure.state === "pressure_detected");
   const matches =
     close(floorGb, evidence.memoryRequiredFloorGb)
-    && evidence.memoryPressureState === (pressure.length > 0
-      ? "pressure_detected"
-      : "no_direct_pressure_detected");
+    && evidence.memoryPressureState === pressure.state;
   return finding(
     "CO-14-MEMORY-WORKING-SET",
     "memory",
     fits && matches,
-    `Independent required memory floor=max(observed ${observedFloorGb ?? "unavailable"} GB with 20% headroom, preserved requirement ${context.requirements.memoryGb} GB)=${floorGb ?? "unavailable"} GB against ${entry.memoryGb} GB; direct pressure signals=${pressure.length}.`
+    `Independent required memory floor=max(observed ${observedFloorGb ?? "unavailable"} GB with 20% headroom, preserved requirement ${context.requirements.memoryGb} GB)=${floorGb ?? "unavailable"} GB against ${entry.memoryGb} GB; direct pressure state=${pressure.state}; direct pressure signals=${pressure.signals.length}.`
   );
 }
 
@@ -911,16 +1059,102 @@ function independentLessElasticMemoryMb(sample: MemoryWorkloadSample): number | 
   return sqlLessElastic > 0 || osNonSql > 0 ? sqlLessElastic + osNonSql : undefined;
 }
 
-function independentDirectMemoryPressure(samples: readonly MemoryWorkloadSample[]): string[] {
-  const signals: string[] = [];
+function independentDirectMemoryPressure(samples: readonly MemoryWorkloadSample[]): {
+  state: "pressure_detected" | "isolated_pressure_detected" | "no_direct_pressure_detected" | "insufficient_evidence";
+  signals: string[];
+} {
+  if (samples.length === 0) {
+    return {
+      state: "insufficient_evidence",
+      signals: []
+    };
+  }
+
+  const blockingSignals: string[] = [];
+  const isolatedSignals: string[] = [];
   const pending = samples.flatMap((sample) =>
     sample.memoryGrantsPending === undefined ? [] : [sample.memoryGrantsPending]
   );
-  if (pending.length > 0 && percentile(pending, 95) > 0) signals.push("grants_pending");
-  if (samples.some((sample) => sample.processPhysicalMemoryLow === true)) signals.push("process_physical_low");
-  if (samples.some((sample) => sample.processVirtualMemoryLow === true)) signals.push("process_virtual_low");
-  if (samples.some((sample) => sample.systemLowMemorySignalState === true)) signals.push("system_low");
-  return signals;
+  if (pending.some((value) => value > 0)) {
+    const stats = independentPressurePersistence(samples, (sample) => (sample.memoryGrantsPending ?? 0) > 0);
+    if (percentile(pending, 95) > 0 || independentPressurePersistenceMet(stats)) {
+      blockingSignals.push("grants_pending");
+    } else {
+      isolatedSignals.push("grants_pending_isolated");
+    }
+  }
+
+  const physicalLow = independentPressurePersistence(samples, (sample) => sample.processPhysicalMemoryLow === true);
+  if (physicalLow.sampleCount > 0) {
+    if (independentPressurePersistenceMet(physicalLow)) blockingSignals.push("process_physical_low");
+    else isolatedSignals.push("process_physical_low_isolated");
+  }
+
+  const virtualLow = independentPressurePersistence(samples, (sample) => sample.processVirtualMemoryLow === true);
+  if (virtualLow.sampleCount > 0) {
+    if (independentPressurePersistenceMet(virtualLow)) blockingSignals.push("process_virtual_low");
+    else isolatedSignals.push("process_virtual_low_isolated");
+  }
+
+  const systemLow = independentPressurePersistence(samples, (sample) => sample.systemLowMemorySignalState === true);
+  if (systemLow.sampleCount > 0) {
+    if (independentPressurePersistenceMet(systemLow)) blockingSignals.push("system_low");
+    else isolatedSignals.push("system_low_isolated");
+  }
+
+  if (blockingSignals.length > 0) {
+    return {
+      state: "pressure_detected",
+      signals: [...blockingSignals, ...isolatedSignals]
+    };
+  }
+  if (isolatedSignals.length > 0) {
+    return {
+      state: "isolated_pressure_detected",
+      signals: isolatedSignals
+    };
+  }
+  return {
+    state: "no_direct_pressure_detected",
+    signals: []
+  };
+}
+
+function independentPressurePersistence(
+  samples: readonly MemoryWorkloadSample[],
+  qualifies: (sample: MemoryWorkloadSample) => boolean
+): { sampleCount: number; samplePct: number; periodCount: number } {
+  const ordered = [...samples].sort((left, right) => left.timestampMs - right.timestampMs);
+  let sampleCount = 0;
+  let periodCount = 0;
+  let consecutive = 0;
+  let previousTimestampMs: number | undefined;
+
+  for (const sample of ordered) {
+    const qualified = qualifies(sample);
+    if (qualified) sampleCount += 1;
+    const continuous =
+      previousTimestampMs === undefined
+      || sample.timestampMs - previousTimestampMs <= 60_000;
+    if (qualified && continuous) {
+      consecutive += 1;
+    } else {
+      if (consecutive >= 5) periodCount += 1;
+      consecutive = qualified ? 1 : 0;
+    }
+    previousTimestampMs = sample.timestampMs;
+  }
+  if (consecutive >= 5) periodCount += 1;
+
+  return {
+    sampleCount,
+    samplePct: ordered.length > 0 ? sampleCount / ordered.length * 100 : 0,
+    periodCount
+  };
+}
+
+function independentPressurePersistenceMet(stats: { samplePct: number; periodCount: number }): boolean {
+  return stats.samplePct >= 10 || stats.periodCount >= 3;
 }
 
 function parseClerks(value: string | undefined): Array<{ type: string; sizeMb: number }> {
@@ -958,6 +1192,23 @@ function exactCatalogEntry(
     && versionMatches(config.sqlServerVersion, entry.engineVersion!)
     && entry.orderable === true
     && entry.sqlServerDefaultVcpuSource === "aws-processor-features"
+  );
+}
+
+function exactCatalogEntryForClass(
+  context: IndependentOracleContext,
+  instanceClass: string
+): InstanceCatalogEntry | undefined {
+  return context.catalog.find((entry) =>
+    entry.instanceClass === instanceClass
+    && entry.region === context.currentConfig.region
+    && Boolean(entry.engine)
+    && entry.sqlServerEdition === context.currentConfig.sqlServerEdition
+    && Boolean(entry.engineVersion)
+    && versionMatches(context.currentConfig.sqlServerVersion, entry.engineVersion!)
+    && entry.orderable === true
+    && entry.sqlServerDefaultVcpuSource === "aws-processor-features"
+    && (context.currentConfig.multiAz !== true || entry.multiAzCapable !== false)
   );
 }
 

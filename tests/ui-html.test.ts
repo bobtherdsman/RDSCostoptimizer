@@ -96,7 +96,7 @@ function result(overrides: Partial<OptimizationResult> = {}): OptimizationResult
 }
 
 describe("manual upload HTML", () => {
-  it("renders a concise business overview separate from the assessment workspace", () => {
+  it("UI-HTML-001: renders a concise business overview separate from the assessment workspace", () => {
     const view = buildManualUploadPageView();
     const html = renderManualUploadPageHtml(view);
 
@@ -118,7 +118,7 @@ describe("manual upload HTML", () => {
     assert.equal(html.includes("Frequently asked questions"), false);
   });
 
-  it("renders offering services on their own page", () => {
+  it("UI-HTML-002: renders offering services on their own page", () => {
     const view = buildManualUploadPageView();
     const html = renderOfferingServicesPageHtml(view);
 
@@ -130,7 +130,7 @@ describe("manual upload HTML", () => {
     assert.equal(html.includes("collectorPackages"), false);
   });
 
-  it("renders the focused assessment upload contract", () => {
+  it("UI-HTML-003: renders the focused assessment upload contract", () => {
     const view = buildManualUploadPageView();
     const html = renderAssessmentPageHtml(view);
 
@@ -143,6 +143,7 @@ describe("manual upload HTML", () => {
     assert.ok(html.includes("RDSSize"));
     assert.equal(html.includes("CompareInstanceClass"), false);
     assert.ok(html.includes("collectorPackages"));
+    assert.ok(html.includes("name=\"exportFormats\" value=\"json,csv,pdf\""));
     assert.ok(html.includes("data-upload-form"));
     assert.ok(html.includes("data-upload-status"));
     assert.ok(html.includes("Analyzing uploads..."));
@@ -151,7 +152,7 @@ describe("manual upload HTML", () => {
     assert.ok(html.includes("Pricing is deferred"));
   });
 
-  it("renders descriptive results without password or dollar savings claims", () => {
+  it("UI-HTML-004: renders descriptive results without password or dollar savings claims", () => {
     const optimized = buildWorkloadOptimizationReport({
       serverName: "optimized-sql",
       result: result()
@@ -268,6 +269,11 @@ describe("manual upload HTML", () => {
     assert.ok(html.includes("db.r8i.4xlarge"));
     assert.ok(html.includes("Why Optimized"));
     assert.ok(html.includes("data:application/json;base64"));
+    assert.ok(html.includes("Download business PDF"));
+    assert.ok(html.includes("Download technical CSV"));
+    assert.ok(html.includes("Download technical JSON"));
+    assert.ok(html.includes("PDF is business-oriented"));
+    assert.ok(html.includes("CSV and JSON preserve technical detail"));
     assert.ok(html.includes("download=\"rds-cost-optimization.json\""));
     assert.ok(html.includes("data:application/pdf;base64"));
     assert.ok(html.includes("No smaller candidate has enough memory."));
@@ -287,7 +293,40 @@ describe("manual upload HTML", () => {
     assert.equal(html.includes("dollar savings"), false);
   });
 
-  it("keeps single-server analysis details visible without the multi-server collapse wrapper", () => {
+  it("UI-HTML-008: renders business PDF and technical CSV/JSON download actions without pricing claims", () => {
+    const report = buildWorkloadOptimizationReport({
+      serverName: "optimized-sql",
+      result: result()
+    });
+    const response: ManualUploadSuccessResponse = {
+      ok: true,
+      uploadCount: 1,
+      collectorInputs: [{
+        rdsEndpoint: "optimized-sql.abc123.us-east-1.rds.amazonaws.com",
+        database: "msdb",
+        existingInstanceClass: "db.r8i.8xlarge",
+        region: "us-east-1"
+      }],
+      analysis: { results: [], batch: { results: [] } },
+      reports: [report],
+      summary: buildWorkloadOptimizationSummary([report]),
+      exports: { json: "{}", csv: "serverName", pdf: "JVBERi0xLjQ=" }
+    };
+
+    const html = renderManualUploadResultsHtml(buildManualUploadResultsView(response));
+
+    assert.ok(html.includes("Download result package"));
+    assert.ok(html.includes("Download business PDF"));
+    assert.ok(html.includes("Download technical CSV"));
+    assert.ok(html.includes("Download technical JSON"));
+    assert.ok(html.includes("data:application/pdf;base64"));
+    assert.ok(html.includes("data:text/csv;base64"));
+    assert.ok(html.includes("data:application/json;base64"));
+    assert.ok(html.includes("Pricing is not included."));
+    assert.equal(/monthly savings|total cost savings|\$/.test(html.toLowerCase()), false);
+  });
+
+  it("UI-HTML-005: keeps single-server analysis details visible without the multi-server collapse wrapper", () => {
     const optimized = buildWorkloadOptimizationReport({
       serverName: "optimized-sql",
       result: result()
@@ -318,7 +357,7 @@ describe("manual upload HTML", () => {
     assert.equal(html.includes("<summary>Show server evidence, blockers, gates, and candidate history</summary>"), false);
   });
 
-  it("renders reason-only resource gates without n/a metric rows", () => {
+  it("UI-HTML-006: renders reason-only resource gates without n/a metric rows", () => {
     const blocked = buildWorkloadOptimizationReport({
       serverName: "blocked-sql",
       result: result({
@@ -366,7 +405,7 @@ describe("manual upload HTML", () => {
     assert.equal(html.includes("<dt>Attribution</dt><dd>Server-level</dd>"), false);
   });
 
-  it("renders short collection windows as evidence checks while keeping fallback visible", () => {
+  it("UI-HTML-007: renders short collection windows as evidence checks while keeping fallback visible", () => {
     const blocked = buildWorkloadOptimizationReport({
       serverName: "short-window-sql",
       result: result({
@@ -415,10 +454,9 @@ describe("manual upload HTML", () => {
     assert.ok(html.includes("Observed 1.01 collected hours is below the 48 hour minimum evidence window."));
     assert.ok(html.includes("Stay As Is"));
     assert.ok(html.includes("Stay As Is"));
-    assert.ok(html.includes("Stay as is on the current instance (db.r8i.8xlarge) because insufficient evidence window"));
+    assert.ok(html.includes("Stay as is on db.r8i.8xlarge. Primary blocker: insufficient evidence window"));
     assert.ok(html.includes("Why Stay As Is"));
-    assert.ok(html.includes("Reassess only after"));
-    assert.ok(html.includes("representative collection window of at least 7 days"));
+    assert.ok(html.includes("collect a longer representative workload window"));
     assert.equal(html.includes("CPU target does not fit the proposed candidate"), false);
     assert.equal(html.includes("BLOCKED risk"), false);
     assert.equal(html.includes("<strong>Not Recommended</strong>"), false);

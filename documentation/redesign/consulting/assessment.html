@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Begin an Engagement — Meridian Data Advisory</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="masthead">
+  <div class="bar">
+    <a class="wordmark" href="index.html">Meridian&nbsp;Data Advisory<small>RDS SQL Server Cost Optimization</small></a>
+    <nav class="nav" aria-label="Primary">
+      <a href="index.html">Overview</a>
+      <a href="approach.html">Approach</a>
+      <a href="results.html">Findings</a>
+      <a href="#">Perspectives</a>
+      <a class="cta" href="assessment.html" aria-current="page">Begin engagement</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero">
+    <div class="container">
+      <p class="eyebrow">Engagement intake</p>
+      <h1>Submit collector evidence to open a review.</h1>
+      <p class="lead">Provide the completed collector package for the workload. We return the outcome, confidence, and the evidence checks behind it — for RDS SQL Server. Pricing and storage redesign are out of scope this phase.</p>
+    </div>
+  </section>
+
+  <section class="section tight">
+    <div class="container">
+      <div style="display:grid;grid-template-columns:1.3fr .9fr;gap:40px;align-items:start">
+        <form class="panel" method="post" action="#" enctype="multipart/form-data" novalidate aria-labelledby="intake">
+          <p class="eyebrow">Submit evidence</p>
+          <h2 id="intake" style="font-size:28px">Collector package</h2>
+          <label class="field"><span>Customer or account name</span>
+            <input name="customerName" type="text" placeholder="e.g. Northwind Trading" autocomplete="organization"></label>
+          <label class="field"><span>Collector output (.zip)</span>
+            <div class="dropzone">Drag &amp; drop the collector <strong>.zip</strong>, or select a file
+              <input name="collectorPackages" type="file" multiple accept=".zip" style="display:block;margin:10px auto 0"></div></label>
+          <button class="cta solid" type="submit">Open review <span class="arrow">&rarr;</span></button>
+          <p class="muted" role="status" aria-live="polite" style="margin:14px 0 0;font-size:13px">Multiple packages are reviewed together as one fleet.</p>
+        </form>
+
+        <aside>
+          <p class="eyebrow">What we require</p>
+          <div class="rule accent"></div>
+          <ul style="list-style:none;padding:0;margin:0;display:grid;gap:14px">
+            <li><strong>Run manifest</strong><br><span class="muted">ServerName, RDSSize, storage, Multi-AZ</span></li>
+            <li><strong>CPU sample series</strong><br><span class="muted">Utilization over the collection window</span></li>
+            <li><strong>Memory, I/O, tempdb samples</strong><br><span class="muted">Physical demand and behavior</span></li>
+            <li><strong>Edition &amp; engine version</strong><br><span class="muted">From CPUINFO</span></li>
+          </ul>
+          <p class="eyebrow" style="margin-top:28px">Safeguards</p>
+          <div class="rule accent"></div>
+          <ul style="list-style:none;padding:0;margin:0;display:grid;gap:10px" class="muted">
+            <li>No customer data is modified</li>
+            <li>Bounded, low-impact collection only</li>
+            <li>No automatic RDS changes</li>
+            <li>Owner-approved access</li>
+          </ul>
+        </aside>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="colophon">
+  <div class="container">
+    <div><p class="brand">Meridian Data Advisory</p><p class="muted" style="margin:.6em 0 0;max-width:40ch">Evidence-led cost optimization for RDS SQL Server. We advise; you decide.</p></div>
+    <div><h4>Engagement</h4><ul><li><a href="approach.html">Approach</a></li><li><a href="assessment.html">Begin engagement</a></li><li><a href="results.html">Sample findings</a></li></ul></div>
+    <div><h4>Scope &amp; safeguards</h4><ul><li class="muted">RDS for SQL Server only</li><li class="muted">No automatic RDS changes</li><li class="muted">Pricing deferred this phase</li></ul></div>
+  </div>
+  <div class="container"><p class="fine">Prototype — consulting design direction.</p></div>
+</footer>
+</body>
+</html>

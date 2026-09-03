@@ -129,7 +129,7 @@ function upload(overrides = {}) {
 }
 
 describe("manual upload analysis", () => {
-  it("runs one manual upload using derived lower-vCPU candidate order", () => {
+  it("API-UPLOAD-001: runs one manual upload using derived lower-vCPU candidate order", () => {
     const response = analyzeManualUploadRequest({
       catalog,
       uploads: [upload()],
@@ -151,7 +151,7 @@ describe("manual upload analysis", () => {
     assert.ok(response.exports.csv?.includes("prod-sql-01"));
   });
 
-  it("preserves per-server reporting for multiple manual uploads", () => {
+  it("API-UPLOAD-002: preserves per-server reporting for multiple manual uploads", () => {
     const response = analyzeManualUploadRequest({
       catalog,
       uploads: [
@@ -167,7 +167,7 @@ describe("manual upload analysis", () => {
     assert.equal(response.summary.totalServers, 2);
   });
 
-  it("returns descriptive validation errors for incomplete manual uploads", () => {
+  it("API-UPLOAD-003: returns descriptive validation errors for incomplete manual uploads", () => {
     const errors = validateManualUploadRequest({
       catalog,
       uploads: [

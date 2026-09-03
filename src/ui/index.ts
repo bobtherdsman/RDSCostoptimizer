@@ -182,10 +182,10 @@ export function buildManualUploadResultsView(response: ManualUploadSuccessRespon
       notOptimizedServerNames: response.summary.notOptimized.map((server) => server.serverName)
     },
     servers: response.reports.map((report) => toServerCard(report)),
-    exportActions: ["json", "csv", "pdf"].map((format) => ({
+    exportActions: ["pdf", "csv", "json"].map((format) => ({
       format,
       available: Boolean(response.exports[format as keyof typeof response.exports]),
-      label: `Download ${format.toUpperCase()}`,
+      label: exportLabel(format),
       href: exportHref(format, response.exports[format as keyof typeof response.exports]),
       filename: `rds-cost-optimization.${format === "pdf" ? "pdf" : format}`
     })),
@@ -782,6 +782,12 @@ function exportHref(format: string, content: string | undefined): string | undef
   if (format === "pdf") return `data:application/pdf;base64,${content}`;
   const mime = format === "json" ? "application/json" : "text/csv";
   return `data:${mime};base64,${Buffer.from(content, "utf8").toString("base64")}`;
+}
+
+function exportLabel(format: string): string {
+  if (format === "pdf") return "Download business PDF";
+  if (format === "csv") return "Download technical CSV";
+  return "Download technical JSON";
 }
 export * from "./html.js";
 

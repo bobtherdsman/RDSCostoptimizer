@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RDS SQL Server Cost Optimization — Advisory</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="masthead">
+  <div class="bar">
+    <a class="wordmark" href="index.html">Meridian&nbsp;Data Advisory<small>RDS SQL Server Cost Optimization</small></a>
+    <nav class="nav" aria-label="Primary">
+      <a href="index.html" aria-current="page">Overview</a>
+      <a href="approach.html">Approach</a>
+      <a href="results.html">Findings</a>
+      <a href="#">Perspectives</a>
+      <a class="cta" href="assessment.html">Begin engagement <span class="arrow">&rarr;</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero">
+    <div class="container hero-grid">
+      <div>
+        <p class="eyebrow">Cloud database advisory</p>
+        <h1>Right-size RDS SQL Server on evidence.</h1>
+        <p class="lead">We help engineering and finance leaders decide — with defensible evidence — whether a SQL Server workload can move to a lower compute footprint, or whether the disciplined choice is to hold.</p>
+        <div class="actions">
+          <a class="cta solid" href="assessment.html">Begin an engagement <span class="arrow">&rarr;</span></a>
+          <a class="cta" href="approach.html">See our approach</a>
+        </div>
+      </div>
+
+      <!-- decision panel visual -->
+      <figure class="visual" aria-label="Illustrative fleet decision panel" style="margin:0">
+        <div class="vhead"><span>Fleet decision</span><span>Northwind · 3 servers</span></div>
+        <div class="vbody">
+          <div class="donut" style="--v:66" role="img" aria-label="Two of three workloads optimizable">
+            <div class="hole"><div><b>2/3</b><span>optimizable</span></div></div>
+          </div>
+          <div class="legend">
+            <div class="gauge"><label>CPU p95</label><div class="track"><div class="fill" style="width:18%"></div></div><b>18%</b></div>
+            <div class="gauge"><label>Memory</label><div class="track"><div class="fill" style="width:60%"></div></div><b>232&nbsp;GB</b></div>
+            <div class="gauge"><label>IOPS p95</label><div class="track"><div class="fill warn" style="width:83%"></div></div><b>50k</b></div>
+            <div class="gauge"><label>Evidence</label><div class="track"><div class="fill" style="width:100%"></div></div><b>7d</b></div>
+          </div>
+        </div>
+        <figcaption class="vfoot"><span>orders-prod-01 &rarr; db.r8i.12xlarge</span><span class="tag ok" style="border:0;padding:0;color:var(--ok)">Recommended</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="band brand">
+    <div class="container" style="padding-top:0;padding-bottom:0">
+      <div class="stats2">
+        <div class="stat"><b>8</b><span>Workload-fit dimensions evaluated</span></div>
+        <div class="stat"><b>0</b><span>Automatic changes to your estate</span></div>
+        <div class="stat"><b>48h+</b><span>Minimum evidence window</span></div>
+        <div class="stat"><b>3</b><span>Decisions: recommend · aggressive · hold</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <div class="head-row">
+        <div><p class="eyebrow">Capabilities</p><h2 style="max-width:16ch;margin:0">Every dimension that governs a safe move.</h2></div>
+        <p class="muted" style="max-width:34ch;margin:0">A recommendation is issued only when all eight fit at the measured confidence level.</p>
+      </div>
+      <div class="matrix">
+        <div class="cell"><div class="ico" aria-hidden="true">◱</div><h3>CPU</h3><p>Projected fit at p95/p99 on the candidate class.</p></div>
+        <div class="cell"><div class="ico" aria-hidden="true">▤</div><h3>Memory</h3><p>Working memory floor, including buffer pool.</p></div>
+        <div class="cell"><div class="ico" aria-hidden="true">⇄</div><h3>IOPS</h3><p>Observed physical IOPS vs effective limits.</p></div>
+        <div class="cell"><div class="ico" aria-hidden="true">≋</div><h3>Throughput</h3><p>Sustained MiB/s against provisioned ceilings.</p></div>
+        <div class="cell"><div class="ico" aria-hidden="true">◷</div><h3>tempdb</h3><p>Placement, version store, and capacity.</p></div>
+        <div class="cell"><div class="ico" aria-hidden="true">◆</div><h3>Edition</h3><p>Enterprise-to-Standard eligibility.</p></div>
+        <div class="cell"><div class="ico" aria-hidden="true">▣</div><h3>Orderability</h3><p>Exact RDS availability of class and version.</p></div>
+        <div class="cell"><div class="ico" aria-hidden="true">◔</div><h3>Evidence</h3><p>Window length and sample continuity.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="container section">
+      <div class="section-index"><span class="no">—</span><p class="eyebrow" style="margin:0">The engagement</p></div>
+      <h2 style="color:#fff;max-width:18ch">Collect, analyze, decide, act.</h2>
+      <div class="flow">
+        <div class="node"><div class="n">01</div><h3>Collect</h3><p>Bounded, low-impact collector run. No tracing or application-table scans.</p></div>
+        <div class="node"><div class="n">02</div><h3>Analyze</h3><p>Fit tested across all eight dimensions with independent verification.</p></div>
+        <div class="node"><div class="n">03</div><h3>Decide</h3><p>A clear outcome with confidence and the evidence behind it.</p></div>
+        <div class="node"><div class="n">04</div><h3>Act</h3><p>An exportable package for engineering and finance. You own the change.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="statement">
+    <div class="container">
+      <p class="eyebrow" style="color:#bcd6f2">Our principle</p>
+      <blockquote>A recommendation you cannot defend is a guess with better formatting.</blockquote>
+      <cite>Meridian Data Advisory — engagement doctrine</cite>
+    </div>
+  </section>
+
+  <section class="section tight">
+    <div class="container" style="display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap">
+      <h2 style="max-width:16ch;margin:0">Quantify the opportunity in your estate.</h2>
+      <a class="cta solid" href="assessment.html">Begin an engagement <span class="arrow">&rarr;</span></a>
+    </div>
+  </section>
+</main>
+
+<footer class="colophon">
+  <div class="container">
+    <div><p class="brand">Meridian Data Advisory</p><p class="muted" style="margin:.6em 0 0;max-width:40ch">Evidence-led cost optimization for RDS SQL Server. We advise; you decide. No customer data is modified.</p></div>
+    <div><h4>Engagement</h4><ul><li><a href="approach.html">Approach</a></li><li><a href="assessment.html">Begin engagement</a></li><li><a href="results.html">Sample findings</a></li></ul></div>
+    <div><h4>Scope &amp; safeguards</h4><ul><li class="muted">RDS for SQL Server only</li><li class="muted">No automatic RDS changes</li><li class="muted">Pricing deferred this phase</li></ul></div>
+  </div>
+  <div class="container"><p class="fine">Prototype — consulting design direction. "Meridian" is a placeholder name; figures illustrative.</p></div>
+</footer>
+</body>
+</html>

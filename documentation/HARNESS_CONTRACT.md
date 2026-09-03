@@ -37,11 +37,14 @@ It verifies the current approved sizing flow:
 3. Verify the selected candidate exists in exact catalog/orderability evidence.
 4. Recalculate CPU projection independently when synchronized CPU samples exist.
 5. Verify preserved CPU thresholds: SQL CPU P95 <= 70%, SQL CPU P99 <= 90%, and concurrent total CPU P99 <= 90%.
-6. Verify memory fit and pressure status before allowing any I/O pass. A RAM-reducing `Recommended` result must have a stable working-set or not-required coupling verdict; otherwise it can only remain validation-required.
-7. Verify IOPS using effective capability: min(candidate instance capability, configured storage IOPS). P95 must be <= 70% and P99 must be <= 90%.
-8. Verify throughput using effective capability: min(candidate instance capability, configured storage throughput). P95 must be <= 70% and P99 must be <= 90%.
-9. Verify that the selected candidate record matches the recommendation when candidate-evaluation evidence is present.
-10. Verify independence from SSATWeb sizing logic.
+6. Verify cross-family CPU confidence. An unnormalized cross-family result may pass CPU hard gates, but cannot remain a hands-free `Recommended` result.
+7. Verify memory fit and pressure status before allowing any I/O pass. A RAM-reducing `Recommended` result must have a stable working-set or not-required coupling verdict; otherwise it can only remain validation-required.
+8. Verify IOPS using effective sustained capability for P95 and effective burst capability for P99. P95 must be <= 70% of min(candidate sustained IOPS, configured storage IOPS), and P99 must be <= 90% of min(candidate burst IOPS, configured storage IOPS).
+9. Verify throughput using effective sustained capability for P95 and effective burst capability for P99. P95 must be <= 70% of min(candidate sustained throughput, configured storage throughput), and P99 must be <= 90% of min(candidate burst throughput, configured storage throughput).
+10. Verify that the selected candidate record matches the recommendation when candidate-evaluation evidence is present.
+11. Verify that production selected the independently ranked best safe survivor from preserved candidate-evaluation evidence.
+12. Verify that fallback-family selection is justified by unavailable, incompatible, unsupported, or failed lead-family paths.
+13. Verify independence from SSATWeb sizing logic.
 
 The harness no longer treats the retired broad oracle bundle as the active
 release authority. Older helper code may remain temporarily during refactoring,
@@ -51,7 +54,7 @@ architecture and current rule document.
 ## Active Verdict Mapping
 
 - `Recommended`: every active hard gate must pass with sufficient evidence.
-- `Aggressive Optimization`: may carry validation-required memory evidence, but must still pass CPU and I/O hard gates.
+- `Aggressive Optimization`: may carry validation-required memory or unnormalized cross-family CPU evidence, but must still pass CPU and I/O hard gates.
 - `Not Recommended`: must include blockers explaining why no safe optimization was proven.
 
 Missing required evidence must fail the active harness check for a hands-free

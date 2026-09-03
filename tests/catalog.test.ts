@@ -4,6 +4,8 @@ import {
   candidateAvailabilityFailures,
   catalogForRegion,
   catalogForSqlServerConfiguration,
+  familyPreferenceForEntry,
+  familyPreferenceForFamily,
   findCheapestValidByCatalogOrder,
   instanceCatalogFromConsolidatedRows,
   instanceCatalogFromOrderableOptions,
@@ -94,7 +96,7 @@ const standardSql2022 = {
 };
 
 describe("catalog/orderability validation", () => {
-  it("parses SQL Server major versions", () => {
+  it("ENG-CATALOG-001: parses SQL Server major versions", () => {
     assert.equal(parseSqlMajorVersion("16.00.4215.2"), 16);
     assert.equal(parseSqlMajorVersion("14"), 14);
     assert.equal(parseSqlMajorVersion("bad"), 0);
@@ -102,7 +104,28 @@ describe("catalog/orderability validation", () => {
     assert.equal(sqlProductVersionMatches("16.00.4215.2", "16.00.4215.3.v1"), false);
   });
 
-  it("accepts a candidate that fits edition, version, memory, IOPS, and throughput", () => {
+  it("ENG-CATALOG-002: reads candidate family preference from catalog-adjacent metadata", () => {
+    assert.equal(familyPreferenceForFamily("r8i").role, "lead");
+    assert.equal(familyPreferenceForFamily("r8i").rank, 0);
+    assert.equal(familyPreferenceForFamily("r7i").role, "fallback");
+    assert.equal(familyPreferenceForFamily("r7i").rank, 1);
+    assert.equal(familyPreferenceForFamily("unknown-family").role, "standard");
+    assert.equal(familyPreferenceForFamily("unknown-family").rank, 2);
+  });
+
+  it("ENG-CATALOG-003: allows catalog entries to carry family preference metadata without code changes", () => {
+    const entry = {
+      ...catalog[0],
+      family: "r7i",
+      familyPreferenceRole: "lead" as const,
+      familyPreferenceRank: 0
+    };
+
+    assert.equal(familyPreferenceForEntry(entry).role, "lead");
+    assert.equal(familyPreferenceForEntry(entry).rank, 0);
+  });
+
+  it("ENG-CATALOG-004: accepts a candidate that fits edition, version, memory, IOPS, and throughput", () => {
     const result = isOrderableCandidate(catalog, standardSql2022, "db.r8i.4xlarge", {
       memoryGb: 96,
       iops: 30000,
@@ -114,7 +137,7 @@ describe("catalog/orderability validation", () => {
     assert.equal(result.entry?.instanceClass, "db.r8i.4xlarge");
   });
 
-  it("rejects memory underfit", () => {
+  it("ENG-CATALOG-005: rejects memory underfit", () => {
     const result = isOrderableCandidate(catalog, standardSql2022, "db.m8i.4xlarge", {
       memoryGb: 96,
       iops: 30000,
@@ -125,7 +148,7 @@ describe("catalog/orderability validation", () => {
     assert.ok(result.failures.some((failure) => failure.startsWith("MEMORY_UNDERFIT")));
   });
 
-  it("rejects IOPS and throughput underfit", () => {
+  it("ENG-CATALOG-006: rejects IOPS and throughput underfit", () => {
     const result = isOrderableCandidate(catalog, standardSql2022, "db.r8i.4xlarge", {
       memoryGb: 96,
       iops: 70000,
@@ -137,7 +160,7 @@ describe("catalog/orderability validation", () => {
     assert.ok(result.failures.some((failure) => failure.startsWith("THROUGHPUT_UNDERFIT")));
   });
 
-  it("rejects unsupported SQL version", () => {
+  it("ENG-CATALOG-007: rejects unsupported SQL version", () => {
     const result = isOrderableCandidate(catalog, { region: "us-east-1", sqlServerEdition: "Standard", sqlServerVersion: "14.00.3465.1" }, "db.x2iedn.8xlarge", {
       memoryGb: 512,
       iops: 40000,
@@ -148,7 +171,7 @@ describe("catalog/orderability validation", () => {
     assert.ok(result.failures.some((failure) => failure.startsWith("SQL_VERSION_NOT_ORDERABLE")));
   });
 
-  it("rejects unsupported edition and version-specific Standard core limit", () => {
+  it("ENG-CATALOG-008: rejects unsupported edition and version-specific Standard core limit", () => {
     const result = isOrderableCandidate(catalog, standardSql2022, "db.x2m.16xlarge", {
       memoryGb: 512,
       iops: 40000,
@@ -160,7 +183,7 @@ describe("catalog/orderability validation", () => {
     assert.ok(result.failures.some((failure) => failure.startsWith("EDITION_CORE_LIMIT_EXCEEDED")));
   });
 
-  it("explains why exact lower-vCPU candidate generation produced no candidates", () => {
+  it("ENG-CATALOG-009: explains why exact lower-vCPU candidate generation produced no candidates", () => {
     const failures = candidateAvailabilityFailures(catalog, {
       region: "us-east-1",
       sqlServerEdition: "Express",
@@ -172,7 +195,7 @@ describe("catalog/orderability validation", () => {
     ]);
   });
 
-  it("returns the first valid candidate in catalog order supplied by caller", () => {
+  it("ENG-CATALOG-010: returns the first valid candidate in catalog order supplied by caller", () => {
     const result = findCheapestValidByCatalogOrder(catalog, standardSql2022, ["db.m8i.4xlarge", "db.r8i.4xlarge"], {
       memoryGb: 96,
       iops: 30000,
@@ -183,7 +206,7 @@ describe("catalog/orderability validation", () => {
     assert.equal(result.entry?.instanceClass, "db.r8i.4xlarge");
   });
 
-  it("rejects generic catalog rows that are not exact AWS SQL Server orderability evidence", () => {
+  it("ENG-CATALOG-011: rejects generic catalog rows that are not exact AWS SQL Server orderability evidence", () => {
     const result = isOrderableCandidate([{
       ...catalog[1],
       region: undefined,
@@ -201,7 +224,7 @@ describe("catalog/orderability validation", () => {
     assert.ok(result.failures.some((failure) => failure.startsWith("EXACT_ORDERABILITY_METADATA_REQUIRED")));
   });
 
-  it("maps copied consolidated catalog rows into regional orderability entries", () => {
+  it("ENG-CATALOG-012: maps copied consolidated catalog rows into regional orderability entries", () => {
     const mapped = instanceCatalogFromConsolidatedRows([
       {
         instanceType: "db.r8i.4xlarge",
@@ -246,7 +269,7 @@ describe("catalog/orderability validation", () => {
     assert.equal(usEast?.maxThroughputMbps, 1500);
   });
 
-  it("filters regional catalogs and validates orderability against current region", () => {
+  it("ENG-CATALOG-013: filters regional catalogs and validates orderability against current region", () => {
     const regionalCatalog: InstanceCatalogEntry[] = [
       { ...catalog[1], region: "us-east-1" },
       { ...catalog[1], region: "eu-west-1", maxIops: 1000 }
@@ -265,7 +288,7 @@ describe("catalog/orderability validation", () => {
     assert.ok(result.failures.some((failure) => failure.startsWith("IOPS_UNDERFIT")));
   });
 
-  it("builds exact SQL Server-visible processor and capability entries from AWS orderability", () => {
+  it("ENG-CATALOG-014: builds exact SQL Server-visible processor and capability entries from AWS orderability", () => {
     const mapped = instanceCatalogFromOrderableOptions([
       {
         Engine: "sqlserver-ee",
@@ -314,11 +337,13 @@ describe("catalog/orderability validation", () => {
     assert.equal(mapped[0].maxThroughputMbps, 2500);
     assert.equal(mapped[0].multiAzCapable, true);
     assert.deepEqual(mapped[0].supportedStorageTypes, ["gp3", "io2"]);
+    assert.equal(mapped[0].familyPreferenceRole, "lead");
+    assert.equal(mapped[0].familyPreferenceRank, 0);
     assert.equal(isOrderableProcessorConfiguration(mapped[0], { coreCount: 4, threadsPerCore: 1 }), true);
     assert.equal(isOrderableProcessorConfiguration(mapped[0], { coreCount: 4, threadsPerCore: 2 }), false);
   });
 
-  it("does not build or accept exact candidates from generic vCPU fallback metadata", () => {
+  it("ENG-CATALOG-015: does not build or accept exact candidates from generic vCPU fallback metadata", () => {
     const mapped = instanceCatalogFromOrderableOptions([{
       Engine: "sqlserver-se",
       EngineVersion: "16.00.4215.2.v1",
@@ -362,7 +387,7 @@ describe("catalog/orderability validation", () => {
     ));
   });
 
-  it("filters exact Region, edition, and SQL product build", () => {
+  it("ENG-CATALOG-016: filters exact Region, edition, and SQL product build", () => {
     const exactCatalog: InstanceCatalogEntry[] = [
       {
         ...catalog[1],

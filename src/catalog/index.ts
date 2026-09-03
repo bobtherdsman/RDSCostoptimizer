@@ -1,4 +1,18 @@
 import type { CurrentRdsConfig, SqlServerEdition } from "../contracts/types.js";
+export {
+  DEFAULT_FAMILY_PREFERENCE_RANK,
+  familyPreferenceFieldsForFamily,
+  familyPreferenceForEntry,
+  familyPreferenceForFamily,
+  familyPreferenceRankForEntry,
+  familyPreferenceRoleForEntry,
+  loadCandidateFamilyPreferenceConfig,
+  type CandidateFamilyPreference,
+  type CandidateFamilyPreferenceConfig,
+  type CandidateFamilyPreferenceFields,
+  type CandidateFamilyPreferenceRole
+} from "./family-preferences.js";
+import { familyPreferenceFieldsForFamily, type CandidateFamilyPreferenceFields } from "./family-preferences.js";
 
 export type RdsSqlServerEngine = "sqlserver-ee" | "sqlserver-se" | "sqlserver-web" | "sqlserver-ex";
 
@@ -21,7 +35,7 @@ export interface LocalInstanceStorageCapability {
   tempdbOnLocalStorage: boolean;
 }
 
-export interface InstanceCatalogEntry {
+export interface InstanceCatalogEntry extends CandidateFamilyPreferenceFields {
   instanceClass: string;
   region?: string;
   family: string;
@@ -404,6 +418,7 @@ export function instanceCatalogFromOrderableOptions(
         capacityGb: localCapacity,
         tempdbOnLocalStorage: localCapacity !== undefined
       },
+      ...familyPreferenceFieldsForFamily(parsedClass.family),
       orderable: true,
       catalogRefreshedAt: refreshedAt
     });
@@ -446,7 +461,8 @@ export function instanceCatalogFromConsolidatedRows(rows: readonly ConsolidatedI
         supportedEditions: edition ? [edition] : [],
         minSqlMajorVersion: sqlMajor,
         maxSqlMajorVersion: null,
-        multiAzCapable: row.multiAZ
+        multiAzCapable: row.multiAZ,
+        ...familyPreferenceFieldsForFamily(parsed.family)
       });
       continue;
     }

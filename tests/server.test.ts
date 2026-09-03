@@ -54,7 +54,7 @@ const catalog: InstanceCatalogEntry[] = [
 ];
 
 describe("collector download package", () => {
-  it("contains only the approved standalone collector files", () => {
+  it("SRV-SERVER-001: contains only the approved standalone collector files", () => {
     const entries = new AdmZip(buildCollectorDownloadZip())
       .getEntries()
       .map((entry) => entry.entryName)
@@ -310,7 +310,7 @@ function csvCell(value: string | number | undefined): string {
 }
 
 describe("manual upload Express assembly", () => {
-  it("returns validation errors instead of crashing when the analyze request has no body", async () => {
+  it("SRV-SERVER-002: returns validation errors instead of crashing when the analyze request has no body", async () => {
     const app = createCostOptimizationServer({ catalog });
     const server = app.listen(0);
     try {
@@ -328,7 +328,7 @@ describe("manual upload Express assembly", () => {
     }
   });
 
-  it("admits only exact AWS SQL Server processor metadata into the runtime catalog", () => {
+  it("SRV-SERVER-003: admits only exact AWS SQL Server processor metadata into the runtime catalog", () => {
     const exact = {
       ...catalog[0],
       region: "us-east-1",
@@ -353,7 +353,7 @@ describe("manual upload Express assembly", () => {
     assert.deepEqual(filtered, [exact]);
   });
 
-  it("builds an analysis request from spreadsheet and collector ZIP files", async () => {
+  it("SRV-SERVER-004: builds an analysis request from spreadsheet and collector ZIP files", async () => {
     const built = await buildManualUploadRequestFromMultipart({
       ownerEmail: "owner@example.com",
       requesterEmail: "owner@example.com",
@@ -386,7 +386,184 @@ describe("manual upload Express assembly", () => {
     assert.equal(analyzed.reports[0].recommendedConfig?.instanceClass, "db.r8i.2xlarge");
   });
 
-  it("does not request inline exports by default for browser uploads", async () => {
+  it("SRV-SERVER-005: generates same-size lead-family candidates before smaller sizes", async () => {
+    const sameSizeCatalog: InstanceCatalogEntry[] = [
+      {
+        instanceClass: "db.m5.4xlarge",
+        region: "us-east-1",
+        family: "m5",
+        size: "4xlarge",
+        vcpu: 16,
+        sqlServerDefaultVcpuSource: "aws-processor-features",
+        memoryGb: 64,
+        baselineIops: 40000,
+        maxIops: 40000,
+        baselineThroughputMbps: 1250,
+        maxThroughputMbps: 1250,
+        supportedEditions: ["Standard"],
+        minSqlMajorVersion: 14,
+        engine: "sqlserver-se",
+        engineVersion: "16.00.4125.3.v1",
+        sqlServerEdition: "Standard",
+        orderable: true
+      },
+      {
+        instanceClass: "db.m8i.4xlarge",
+        region: "us-east-1",
+        family: "m8i",
+        size: "4xlarge",
+        vcpu: 12,
+        sqlServerDefaultVcpuSource: "aws-processor-features",
+        memoryGb: 64,
+        baselineIops: 40000,
+        maxIops: 40000,
+        baselineThroughputMbps: 1250,
+        maxThroughputMbps: 1250,
+        supportedEditions: ["Standard"],
+        minSqlMajorVersion: 14,
+        engine: "sqlserver-se",
+        engineVersion: "16.00.4125.3.v1",
+        sqlServerEdition: "Standard",
+        orderable: true
+      },
+      catalog[0]
+    ];
+    const manifest = [
+      "ServerName,RDSSize,StorageType,ProvisionedIops,ProvisionedThroughputMbps,AllocatedStorageGb,MultiAz",
+      "prod-sql-01.abc123.us-east-1.rds.amazonaws.com,db.m5.4xlarge,gp3,12000,500,512,false"
+    ].join("\n");
+
+    const built = await buildManualUploadRequestFromMultipart({
+      ownerEmail: "owner@example.com",
+      requesterEmail: "owner@example.com",
+      collectorPackages: [{ originalname: "collector.zip", buffer: collectorZipWithManifest(manifest) }],
+      catalog: sameSizeCatalog
+    });
+
+    assert.equal(built.ok, true, JSON.stringify(built));
+    if (!built.ok) return;
+    assert.deepEqual(built.request.uploads[0].orderedCandidateInstanceClasses, [
+      "db.m8i.4xlarge",
+      "db.r8i.2xlarge"
+    ]);
+  });
+
+  it("SRV-SERVER-006: uses catalog family preference metadata for same-size candidate ordering", async () => {
+    const current = {
+      ...catalog[0],
+      instanceClass: "db.m5.4xlarge",
+      family: "m5",
+      size: "4xlarge",
+      vcpu: 16
+    };
+    const sameSizeCatalog: InstanceCatalogEntry[] = [
+      current,
+      {
+        ...current,
+        instanceClass: "db.customfallback.4xlarge",
+        family: "customfallback",
+        vcpu: 12,
+        familyPreferenceRole: "fallback",
+        familyPreferenceRank: 1
+      },
+      {
+        ...current,
+        instanceClass: "db.customlead.4xlarge",
+        family: "customlead",
+        vcpu: 12,
+        familyPreferenceRole: "lead",
+        familyPreferenceRank: 0
+      }
+    ];
+    const manifest = [
+      "ServerName,RDSSize,StorageType,ProvisionedIops,ProvisionedThroughputMbps,AllocatedStorageGb,MultiAz",
+      "prod-sql-01.abc123.us-east-1.rds.amazonaws.com,db.m5.4xlarge,gp3,12000,500,512,false"
+    ].join("\n");
+
+    const built = await buildManualUploadRequestFromMultipart({
+      ownerEmail: "owner@example.com",
+      requesterEmail: "owner@example.com",
+      collectorPackages: [{ originalname: "collector.zip", buffer: collectorZipWithManifest(manifest) }],
+      catalog: sameSizeCatalog
+    });
+
+    assert.equal(built.ok, true, JSON.stringify(built));
+    if (!built.ok) return;
+    assert.deepEqual(built.request.uploads[0].orderedCandidateInstanceClasses, [
+      "db.customlead.4xlarge",
+      "db.customfallback.4xlarge"
+    ]);
+  });
+
+  it("SRV-SERVER-007: generates same-size Optimize CPU rescue candidates before smaller I/O paths", async () => {
+    const optimizeCpuCatalog: InstanceCatalogEntry[] = [
+      {
+        instanceClass: "db.m5.4xlarge",
+        region: "us-east-1",
+        family: "m5",
+        size: "4xlarge",
+        vcpu: 16,
+        sqlServerDefaultVcpuSource: "aws-processor-features",
+        memoryGb: 64,
+        baselineIops: 40000,
+        maxIops: 40000,
+        baselineThroughputMbps: 1250,
+        maxThroughputMbps: 1250,
+        supportedEditions: ["Standard"],
+        minSqlMajorVersion: 14,
+        engine: "sqlserver-se",
+        engineVersion: "16.00.4125.3.v1",
+        sqlServerEdition: "Standard",
+        orderable: true
+      },
+      {
+        instanceClass: "db.r8i.4xlarge",
+        region: "us-east-1",
+        family: "r8i",
+        size: "4xlarge",
+        vcpu: 16,
+        defaultCpuCores: 8,
+        defaultThreadsPerCore: 2,
+        sqlServerDefaultVcpuSource: "aws-processor-features",
+        optimizeCpuConfigurations: [
+          { coreCount: 4, threadsPerCore: 2, sqlServerVisibleVcpu: 8, isDefault: false },
+          { coreCount: 8, threadsPerCore: 2, sqlServerVisibleVcpu: 16, isDefault: true }
+        ],
+        memoryGb: 128,
+        baselineIops: 80000,
+        maxIops: 80000,
+        baselineThroughputMbps: 2000,
+        maxThroughputMbps: 2000,
+        supportedEditions: ["Standard"],
+        minSqlMajorVersion: 14,
+        engine: "sqlserver-se",
+        engineVersion: "16.00.4125.3.v1",
+        sqlServerEdition: "Standard",
+        orderable: true
+      },
+      catalog[0]
+    ];
+    const manifest = [
+      "ServerName,RDSSize,StorageType,ProvisionedIops,ProvisionedThroughputMbps,AllocatedStorageGb,MultiAz",
+      "prod-sql-01.abc123.us-east-1.rds.amazonaws.com,db.m5.4xlarge,gp3,12000,500,512,false"
+    ].join("\n");
+
+    const built = await buildManualUploadRequestFromMultipart({
+      ownerEmail: "owner@example.com",
+      requesterEmail: "owner@example.com",
+      collectorPackages: [{ originalname: "collector.zip", buffer: collectorZipWithManifest(manifest) }],
+      catalog: optimizeCpuCatalog
+    });
+
+    assert.equal(built.ok, true, JSON.stringify(built));
+    if (!built.ok) return;
+    assert.deepEqual(built.request.uploads[0].orderedCandidateInstanceClasses, [
+      "db.r8i.4xlarge",
+      "db.r8i.2xlarge"
+    ]);
+  });
+
+  it("SRV-SERVER-008: requests PDF, CSV, and JSON exports by default for browser uploads", async () => {
     const built = await buildManualUploadRequestFromMultipart({
       ownerEmail: "owner@example.com",
       requesterEmail: "owner@example.com",
@@ -396,15 +573,17 @@ describe("manual upload Express assembly", () => {
 
     assert.equal(built.ok, true, JSON.stringify(built));
     if (!built.ok) return;
-    assert.deepEqual(built.request.exportFormats, []);
+    assert.deepEqual(built.request.exportFormats, ["json", "csv", "pdf"]);
 
     const analyzed = analyzeManualUploadRequest(built.request);
     assert.equal(analyzed.ok, true);
     if (!analyzed.ok) return;
-    assert.deepEqual(analyzed.exports, {});
+    assert.ok(analyzed.exports.json?.includes('"summary"'));
+    assert.ok(analyzed.exports.csv?.startsWith("summaryTotalServers"));
+    assert.ok(analyzed.exports.pdf && Buffer.from(analyzed.exports.pdf, "base64").toString("utf8").startsWith("%PDF-1.4"));
   });
 
-  it("builds an analysis request from compact CO workload samples without legacy memory CSV", async () => {
+  it("SRV-SERVER-009: builds an analysis request from compact CO workload samples without legacy memory CSV", async () => {
     const built = await buildManualUploadRequestFromMultipart({
       customerName: "Example Customer",
       collectorPackages: [{ originalname: "collector.zip", buffer: compactCollectorZip() }],
@@ -423,7 +602,7 @@ describe("manual upload Express assembly", () => {
     assert.ok(upload.collectorCsvs.workloadSamplesCsv?.includes("file_io"));
   });
 
-  it("uses alternate current-config CSV when the collector run manifest is missing", async () => {
+  it("SRV-SERVER-010: uses alternate current-config CSV when the collector run manifest is missing", async () => {
     const quotedSpreadsheetCsv = spreadsheetCsv
       .split("\n")
       .map((line) => line.split(",").map((cell) => `"${cell}"`).join(","))
@@ -449,7 +628,7 @@ describe("manual upload Express assembly", () => {
     assert.equal(built.request.uploads[0].requirements.memoryGb, 7.31);
   });
 
-  it("assesses collector evidence when current RDSSize is missing", async () => {
+  it("SRV-SERVER-011: assesses collector evidence when current RDSSize is missing", async () => {
     const endpoint = "sqlserver.c8gp6baoubnh.us-east-1.rds.amazonaws.com";
     const withEndpoint = (text: string) => text.replaceAll("sql1", endpoint);
     const zip = new AdmZip();
@@ -481,7 +660,7 @@ describe("manual upload Express assembly", () => {
     assert.ok(analyzed.reports[0].advisorySignals.some((signal) => signal.includes("did not include RDSSize")));
   });
 
-  it("accepts legacy summary TotalIOPs evidence when compact file_io rows are unavailable", async () => {
+  it("SRV-SERVER-012: accepts legacy summary TotalIOPs evidence when compact file_io rows are unavailable", async () => {
     const endpoint = "GAP_96XL_IOPS";
     const summaryIoCsv = [
       "\"ServerName\",\"TotalIOPs\",\"Throuput\",\"CollectionTime\"",
@@ -512,7 +691,7 @@ describe("manual upload Express assembly", () => {
     assert.equal(analyzed.ok, true, JSON.stringify(analyzed));
   });
 
-  it("classifies required collector CSVs by header when filenames are different", async () => {
+  it("SRV-SERVER-013: classifies required collector CSVs by header when filenames are different", async () => {
     const zip = new AdmZip();
     zip.addFile("part-001.csv", Buffer.from(cpuCsv));
     zip.addFile("part-002.csv", Buffer.from(cpuInfoCsv));
@@ -534,7 +713,7 @@ describe("manual upload Express assembly", () => {
     assert.ok(built.request.uploads[0].collectorCsvs.ioCsv?.includes("TotalIOPs"));
   });
 
-  it("blocks when CPUINFO evidence is missing", async () => {
+  it("SRV-SERVER-014: blocks when CPUINFO evidence is missing", async () => {
     const zip = new AdmZip();
     zip.addFile("cpu.csv", Buffer.from(cpuCsv));
     zip.addFile("memory.csv", Buffer.from(memoryCsv));
@@ -553,7 +732,7 @@ describe("manual upload Express assembly", () => {
     assert.ok(built.errors.some((error) => error.code === "COLLECTOR_CPUINFO_FACTS_REQUIRED"));
   });
 
-  it("blocks when memory evidence is missing", async () => {
+  it("SRV-SERVER-015: blocks when memory evidence is missing", async () => {
     const zip = new AdmZip();
     zip.addFile("cpu.csv", Buffer.from(cpuCsv));
     zip.addFile("cpuinfo.csv", Buffer.from(cpuInfoCsv));
@@ -572,7 +751,7 @@ describe("manual upload Express assembly", () => {
     assert.ok(built.errors.some((error) => error.code === "COLLECTOR_MEMORY_FACTS_REQUIRED"));
   });
 
-  it("blocks when I/O evidence is missing", async () => {
+  it("SRV-SERVER-016: blocks when I/O evidence is missing", async () => {
     const zip = new AdmZip();
     zip.addFile("cpu.csv", Buffer.from(cpuCsv));
     zip.addFile("cpuinfo.csv", Buffer.from(cpuInfoCsv));
@@ -591,7 +770,7 @@ describe("manual upload Express assembly", () => {
     assert.ok(built.errors.some((error) => error.code === "COLLECTOR_IO_FACTS_REQUIRED"));
   });
 
-  it("preserves approved Standard Edition confirmations and collector edition evidence", async () => {
+  it("SRV-SERVER-017: preserves approved Standard Edition confirmations and collector edition evidence", async () => {
     const zip = new AdmZip();
     zip.addFile("cpu.csv", Buffer.from(cpuCsv));
     zip.addFile("cpuinfo.csv", Buffer.from(cpuInfoCsv));
@@ -627,7 +806,7 @@ describe("manual upload Express assembly", () => {
     assert.match(built.request.uploads[0].collectorCsvs.editionCompatibilityCsv ?? "", /DATABASE_AUDIT/);
   });
 
-  it("groups multi-server package metrics by manifest ServerName filename prefix", async () => {
+  it("SRV-SERVER-018: groups multi-server package metrics by manifest ServerName filename prefix", async () => {
     const zip = new AdmZip();
     const manifest = [
       "ServerName,RDSSize,StorageType,ProvisionedIops,ProvisionedThroughputMbps,AllocatedStorageGb,MultiAz",
@@ -675,7 +854,7 @@ describe("manual upload Express assembly", () => {
     assert.ok(built.request.uploads[1].collectorCsvs.ioCsv?.includes("orders_b"));
   });
 
-  it("fails closed when a multi-server package cannot isolate one server's files", async () => {
+  it("SRV-SERVER-019: fails closed when a multi-server package cannot isolate one server's files", async () => {
     const zip = new AdmZip();
     const manifest = [
       "ServerName,RDSSize,StorageType,ProvisionedIops,ProvisionedThroughputMbps,AllocatedStorageGb,MultiAz",
@@ -704,7 +883,7 @@ describe("manual upload Express assembly", () => {
     ));
   });
 
-  it("uses endpoint region to filter regional catalog rows", async () => {
+  it("SRV-SERVER-020: uses endpoint region to filter regional catalog rows", async () => {
     const regionalCatalog: InstanceCatalogEntry[] = [
       { ...catalog[0], region: "eu-west-1", maxIops: 1000 },
       { ...catalog[0], region: "us-east-1", maxIops: 40000 },
@@ -733,7 +912,7 @@ describe("manual upload Express assembly", () => {
     );
   });
 
-  it("falls back to us-east-1 and labels evidence when endpoint region cannot be inferred", async () => {
+  it("SRV-SERVER-021: falls back to us-east-1 and labels evidence when endpoint region cannot be inferred", async () => {
     const fallbackManifest = [
       "ServerName,RDSSize,StorageType,ProvisionedIops,ProvisionedThroughputMbps,AllocatedStorageGb,MultiAz",
       "prod-sql-01.rds.amazonaws.com,db.r8i.4xlarge,gp3,12000,500,512,false"
@@ -757,7 +936,7 @@ describe("manual upload Express assembly", () => {
     assert.ok(analyzed.reports[0].advisorySignals.some((signal) => signal.includes("using us-east-1")));
   });
 
-  it("uses CPUINFO current vCPU when current RDSSize is missing from the catalog", async () => {
+  it("SRV-SERVER-022: uses CPUINFO current vCPU when current RDSSize is missing from the catalog", async () => {
     const missingCurrentManifest = [
       "ServerName,RDSSize,StorageType,ProvisionedIops,ProvisionedThroughputMbps,AllocatedStorageGb,MultiAz",
       "prod-sql-01.abc123.us-east-1.rds.amazonaws.com,db.r8i.12xlarge,gp3,12000,500,512,false"
@@ -783,7 +962,7 @@ describe("manual upload Express assembly", () => {
     assert.ok(analyzed.reports[0].advisorySignals.some((signal) => signal.includes("not found in the us-east-1 catalog")));
   });
 
-  it("allows upload assembly without owner email until registration and login are implemented", async () => {
+  it("SRV-SERVER-023: allows upload assembly without owner email until registration and login are implemented", async () => {
     const built = await buildManualUploadRequestFromMultipart({
       customerName: "Example Customer",
       collectorPackages: [{ originalname: "collector.zip", buffer: collectorZip() }],
@@ -795,7 +974,7 @@ describe("manual upload Express assembly", () => {
     assert.equal(built.request.uploads.length, 1);
   });
 
-  it("does not treat installed memory or SQL target memory as required workload memory", async () => {
+  it("SRV-SERVER-024: does not treat installed memory or SQL target memory as required workload memory", async () => {
     const lowUsageMemoryCsv = [
       "ServerName,SQL_CollectionTime,SQLCurrMemUsageMB,SQLMaxMemTargetMB,OSTotalMemoryMB,OSAVAMemoryMB,PLE,StolenServerMem,MemoryClerksData",
       "sql1,2026-08-21 00:00:00,2048,262144,262144,245760,9000,100,{}",

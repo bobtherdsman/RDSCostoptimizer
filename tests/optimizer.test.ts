@@ -163,14 +163,14 @@ function physicalIo(
 }
 
 describe("requiredVcpuForCpuTarget", () => {
-  it("uses CPU P95 and target utilization", () => {
+  it("ENG-OPTIMIZER-001: uses CPU P95 and target utilization", () => {
     assert.equal(requiredVcpuForCpuTarget(32, 20), 10);
     assert.equal(requiredVcpuForCpuTarget(32, 0), 1);
   });
 });
 
 describe("optimizeComputeCandidate", () => {
-  it("selects the first caller-ordered candidate that passes all fit checks", () => {
+  it("ENG-OPTIMIZER-002: selects a safe caller-ordered candidate that passes all fit checks", () => {
     const result = optimizeComputeCandidate({
       currentConfig,
       workload: workload(15),
@@ -197,7 +197,173 @@ describe("optimizeComputeCandidate", () => {
     assert.ok(result.passedChecks.includes("COLLECTION_WINDOW_MEDIUM_CONFIDENCE"));
   });
 
-  it("blocks production-safe recommendations when collection window is below 48 hours", () => {
+  it("ENG-OPTIMIZER-003: supports a same-size generational move when SQL-visible vCPU differs", () => {
+    const sameSizeCatalog: InstanceCatalogEntry[] = [
+      {
+        instanceClass: "db.m5.4xlarge",
+        region: "us-east-1",
+        family: "m5",
+        size: "4xlarge",
+        vcpu: 16,
+        sqlServerDefaultVcpuSource: "aws-processor-features",
+        memoryGb: 64,
+        baselineIops: 40000,
+        maxIops: 40000,
+        baselineThroughputMbps: 1250,
+        maxThroughputMbps: 1250,
+        supportedEditions: ["Standard"],
+        minSqlMajorVersion: 14,
+        engine: "sqlserver-se",
+        engineVersion: "16.00.4125.3.v1",
+        sqlServerEdition: "Standard",
+        orderable: true
+      },
+      {
+        instanceClass: "db.m8i.4xlarge",
+        region: "us-east-1",
+        family: "m8i",
+        size: "4xlarge",
+        vcpu: 12,
+        sqlServerDefaultVcpuSource: "aws-processor-features",
+        memoryGb: 64,
+        baselineIops: 40000,
+        maxIops: 40000,
+        baselineThroughputMbps: 1250,
+        maxThroughputMbps: 1250,
+        supportedEditions: ["Standard"],
+        minSqlMajorVersion: 14,
+        engine: "sqlserver-se",
+        engineVersion: "16.00.4125.3.v1",
+        sqlServerEdition: "Standard",
+        orderable: true
+      }
+    ];
+
+    const result = optimizeComputeCandidate({
+      currentConfig: {
+        ...currentConfig,
+        instanceClass: "db.m5.4xlarge"
+      },
+      workload: workload(20),
+      catalog: sameSizeCatalog,
+      orderedCandidateInstanceClasses: ["db.m8i.4xlarge"],
+      currentVcpu: 16,
+      requirements: { memoryGb: 48, iops: 6000, throughputMbps: 200 }
+    });
+
+    assert.equal(result.recommendedConfig?.instanceClass, "db.m8i.4xlarge");
+    assert.equal(result.recommendedConfig?.sqlServerVisibleVcpu, 12);
+    assert.equal(result.optimizationEvidence?.projectedSqlCpuP95Pct, 26.67);
+  });
+
+  it("ENG-OPTIMIZER-004: selects the smaller safe candidate when two candidates pass", () => {
+    const result = optimizeComputeCandidate({
+      currentConfig,
+      workload: workload(10),
+      catalog,
+      orderedCandidateInstanceClasses: ["db.r8i.4xlarge", "db.r8i.2xlarge"],
+      currentVcpu: 32,
+      requirements: { memoryGb: 48, iops: 6000, throughputMbps: 200 }
+    });
+
+    assert.equal(result.decision, "Recommended");
+    assert.equal(result.recommendedConfig?.instanceClass, "db.r8i.2xlarge");
+    assert.equal(result.recommendedConfig?.sqlServerVisibleVcpu, 8);
+    assert.equal(result.candidateEvaluations.filter((candidate) => candidate.accepted).length, 2);
+    assert.equal(result.candidateEvaluations.find((candidate) => candidate.instanceClass === "db.r8i.4xlarge")?.selected, false);
+  });
+
+  it("ENG-OPTIMIZER-005: uses a fallback family only when the lead-family path fails a workload gate", () => {
+    const fallbackCatalog: InstanceCatalogEntry[] = [
+      {
+        ...catalog[0],
+        instanceClass: "db.m8i.2xlarge",
+        family: "m8i",
+        memoryGb: 32
+      },
+      {
+        ...catalog[1],
+        instanceClass: "db.r7i.2xlarge",
+        family: "r7i",
+        memoryGb: 64
+      }
+    ];
+
+    const result = optimizeComputeCandidate({
+      currentConfig,
+      workload: workload(15),
+      catalog: fallbackCatalog,
+      orderedCandidateInstanceClasses: ["db.m8i.2xlarge", "db.r7i.2xlarge"],
+      currentVcpu: 32,
+      requirements: { memoryGb: 48, iops: 6000, throughputMbps: 200 }
+    });
+
+    assert.equal(result.recommendedConfig?.instanceClass, "db.r7i.2xlarge");
+    assert.ok(result.candidateEvaluations.some((candidate) =>
+      candidate.instanceClass === "db.m8i.2xlarge"
+      && candidate.failedGates.includes("MEMORY_LESS_ELASTIC_FLOOR_UNDERFIT")
+    ));
+  });
+
+  it("ENG-OPTIMIZER-006: prefers a lead family over an equivalent fallback survivor", () => {
+    const equivalentCatalog: InstanceCatalogEntry[] = [
+      {
+        ...catalog[1],
+        instanceClass: "db.r7i.2xlarge",
+        family: "r7i"
+      },
+      {
+        ...catalog[1],
+        instanceClass: "db.m8i.2xlarge",
+        family: "m8i"
+      }
+    ];
+
+    const result = optimizeComputeCandidate({
+      currentConfig,
+      workload: workload(15),
+      catalog: equivalentCatalog,
+      orderedCandidateInstanceClasses: ["db.r7i.2xlarge", "db.m8i.2xlarge"],
+      currentVcpu: 32,
+      requirements: { memoryGb: 48, iops: 6000, throughputMbps: 200 }
+    });
+
+    assert.equal(result.recommendedConfig?.instanceClass, "db.m8i.2xlarge");
+    assert.equal(result.candidateEvaluations.filter((candidate) => candidate.accepted).length, 2);
+  });
+
+  it("ENG-OPTIMIZER-007: uses catalog family preference metadata when ranking equivalent survivors", () => {
+    const equivalentCatalog: InstanceCatalogEntry[] = [
+      {
+        ...catalog[1],
+        instanceClass: "db.customfallback.2xlarge",
+        family: "customfallback",
+        familyPreferenceRole: "fallback",
+        familyPreferenceRank: 1
+      },
+      {
+        ...catalog[1],
+        instanceClass: "db.customlead.2xlarge",
+        family: "customlead",
+        familyPreferenceRole: "lead",
+        familyPreferenceRank: 0
+      }
+    ];
+
+    const result = optimizeComputeCandidate({
+      currentConfig,
+      workload: workload(15),
+      catalog: equivalentCatalog,
+      orderedCandidateInstanceClasses: ["db.customfallback.2xlarge", "db.customlead.2xlarge"],
+      currentVcpu: 32,
+      requirements: { memoryGb: 48, iops: 6000, throughputMbps: 200 }
+    });
+
+    assert.equal(result.recommendedConfig?.instanceClass, "db.customlead.2xlarge");
+    assert.equal(result.candidateEvaluations.filter((candidate) => candidate.accepted).length, 2);
+  });
+
+  it("ENG-OPTIMIZER-008: blocks production-safe recommendations when collection window is below 48 hours", () => {
     const shortWorkload = {
       ...workload(15),
       collectionHours: 4
@@ -224,7 +390,7 @@ describe("optimizeComputeCandidate", () => {
     assert.match(result.blockers[0].message, /below 48 hours/);
   });
 
-  it("allows the documented sub-48-hour path only with explicit customer confirmation", () => {
+  it("ENG-OPTIMIZER-009: allows the documented sub-48-hour path only with explicit customer confirmation", () => {
     const result = optimizeComputeCandidate({
       currentConfig,
       workload: {
@@ -251,7 +417,7 @@ describe("optimizeComputeCandidate", () => {
     assert.equal(result.evidenceWindow?.shortWindowException?.customerConfirmed, true);
   });
 
-  it("returns Aggressive Optimization when a material RAM reduction lacks stable working-set evidence", () => {
+  it("ENG-OPTIMIZER-010: returns Aggressive Optimization when a material RAM reduction lacks stable working-set evidence", () => {
     const currentEntry: InstanceCatalogEntry = {
       instanceClass: "db.r8i.8xlarge",
       region: "us-east-1",
@@ -290,7 +456,7 @@ describe("optimizeComputeCandidate", () => {
     ));
   });
 
-  it("uses preliminary confidence for three to six days and high confidence from fourteen days", () => {
+  it("ENG-OPTIMIZER-011: uses preliminary confidence for three to six days and high confidence from fourteen days", () => {
     const preliminary = optimizeComputeCandidate({
       currentConfig,
       workload: { ...workload(15), collectionHours: 96 },
@@ -314,7 +480,7 @@ describe("optimizeComputeCandidate", () => {
     assert.ok(preferred.passedChecks.includes("COLLECTION_WINDOW_HIGH_CONFIDENCE"));
   });
 
-  it("does not invent utilization risk bands when verified physical I/O fits", () => {
+  it("ENG-OPTIMIZER-012: does not invent utilization risk bands when verified physical I/O fits", () => {
     const result = optimizeComputeCandidate({
       currentConfig,
       workload: workload(10),
@@ -332,7 +498,7 @@ describe("optimizeComputeCandidate", () => {
     assert.notEqual(result.risk, "high");
   });
 
-  it("blocks when CPU target cannot fit candidate vCPU", () => {
+  it("ENG-OPTIMIZER-013: blocks when CPU target cannot fit candidate vCPU", () => {
     const result = optimizeComputeCandidate({
       currentConfig,
       workload: workload(60),
@@ -350,7 +516,7 @@ describe("optimizeComputeCandidate", () => {
     assert.ok(result.blockers.some((blocker) => blocker.code === "CPU_P95_TARGET_EXCEEDED"));
   });
 
-  it("blocks when every candidate fails memory, IOPS, or throughput fit checks", () => {
+  it("ENG-OPTIMIZER-014: blocks when every candidate fails memory, IOPS, or throughput fit checks", () => {
     const result = optimizeComputeCandidate({
       currentConfig,
       workload: {
@@ -377,7 +543,7 @@ describe("optimizeComputeCandidate", () => {
     assert.ok(result.blockers.some((blocker) => blocker.dimension === "throughput"));
   });
 
-  it("does not classify CPU as underutilized when the lower-vCPU class is not orderable for the SQL version", () => {
+  it("ENG-OPTIMIZER-015: does not classify CPU as underutilized when the lower-vCPU class is not orderable for the SQL version", () => {
     const result = optimizeComputeCandidate({
       currentConfig: {
         ...currentConfig,
@@ -398,7 +564,7 @@ describe("optimizeComputeCandidate", () => {
     assert.ok(result.blockers.some((blocker) => blocker.code === "SQL_VERSION_NOT_ORDERABLE"));
   });
 
-  it("uses projected P95 for sizing and projected P99 as the burst safety gate", () => {
+  it("ENG-OPTIMIZER-016: uses projected P95 for sizing and projected P99 as the burst safety gate", () => {
     const burstyWorkload = {
       ...workload(20),
       sampleSeries: synchronizedCpuSampleSeries([
@@ -420,7 +586,7 @@ describe("optimizeComputeCandidate", () => {
     assert.ok(!result.blockers.some((blocker) => blocker.code === "CPU_P95_TARGET_EXCEEDED"));
   });
 
-  it("applies concurrent Other CPU through the projected total CPU P99 hard gate", () => {
+  it("ENG-OPTIMIZER-017: applies concurrent Other CPU through the projected total CPU P99 hard gate", () => {
     const result = optimizeComputeCandidate({
       currentConfig,
       workload: {
@@ -441,7 +607,7 @@ describe("optimizeComputeCandidate", () => {
     assert.ok(!result.blockers.some((blocker) => blocker.code === "CPU_P99_BURST_LIMIT_EXCEEDED"));
   });
 
-  it("reports an isolated projected excursion without letting the raw maximum replace P99", () => {
+  it("ENG-OPTIMIZER-018: reports an isolated projected excursion without letting the raw maximum replace P99", () => {
     const result = optimizeComputeCandidate({
       currentConfig,
       workload: {
@@ -463,7 +629,7 @@ describe("optimizeComputeCandidate", () => {
     assert.equal(result.risk, "medium");
   });
 
-  it("generates and selects an orderable Optimize CPU configuration on the current class", () => {
+  it("ENG-OPTIMIZER-019: generates and selects an orderable Optimize CPU configuration on the current class", () => {
     const optimizeCpuCatalog: InstanceCatalogEntry[] = [
       {
         instanceClass: "db.r8i.8xlarge",
@@ -507,7 +673,7 @@ describe("optimizeComputeCandidate", () => {
     assert.equal(result.optimizationEvidence?.cpuProjectionBasis, "same_hardware");
   });
 
-  it("lowers cross-family confidence without a capacity factor and uses a factor when supplied", () => {
+  it("ENG-OPTIMIZER-020: lowers cross-family confidence without a capacity factor and uses a factor when supplied", () => {
     const currentEntry: InstanceCatalogEntry = {
       instanceClass: "db.r8i.8xlarge",
       region: "us-east-1",
@@ -528,7 +694,7 @@ describe("optimizeComputeCandidate", () => {
     const unadjusted = optimizeComputeCandidate({
       currentConfig,
       workload: workload(15),
-      catalog: [currentEntry, catalog[0]],
+      catalog: [currentEntry, { ...catalog[0], memoryGb: 256 }],
       orderedCandidateInstanceClasses: ["db.m8i.2xlarge"],
       currentVcpu: 32,
       requirements: { memoryGb: 16, iops: 6000, throughputMbps: 200 }
@@ -538,7 +704,7 @@ describe("optimizeComputeCandidate", () => {
       workload: workload(15),
       catalog: [
         { ...currentEntry, normalizedPerCoreCapacity: 1 },
-        { ...catalog[0], normalizedPerCoreCapacity: 1.2 }
+        { ...catalog[0], memoryGb: 256, normalizedPerCoreCapacity: 1.2 }
       ],
       orderedCandidateInstanceClasses: ["db.m8i.2xlarge"],
       currentVcpu: 32,
@@ -547,13 +713,15 @@ describe("optimizeComputeCandidate", () => {
 
     assert.equal(unadjusted.optimizationEvidence?.cpuProjectionConfidence, "low");
     assert.equal(unadjusted.optimizationEvidence?.cpuProjectionBasis, "unadjusted_cross_family");
+    assert.equal(unadjusted.decision, "Aggressive Optimization");
     assert.equal(normalized.optimizationEvidence?.cpuProjectionConfidence, "medium");
     assert.equal(normalized.optimizationEvidence?.cpuProjectionBasis, "normalized_cross_family");
+    assert.equal(normalized.decision, "Recommended");
     assert.equal(normalized.optimizationEvidence?.normalizedPerCoreCapacityFactor, 1.2);
     assert.equal(normalized.optimizationEvidence?.projectedSqlCpuP95Pct, 50);
   });
 
-  it("blocks a candidate when physical IOPS P95 exceeds effective capability headroom", () => {
+  it("ENG-OPTIMIZER-021: blocks a candidate when physical IOPS P95 exceeds effective capability headroom", () => {
     const result = optimizeComputeCandidate({
       currentConfig,
       workload: {
@@ -570,7 +738,7 @@ describe("optimizeComputeCandidate", () => {
     assert.ok(result.blockers.some((blocker) => blocker.code === "IOPS_P95_EFFECTIVE_CAPABILITY_EXCEEDED"));
   });
 
-  it("blocks an isolated IOPS maximum above effective capability", () => {
+  it("ENG-OPTIMIZER-022: preserves an isolated IOPS maximum as evidence when P95 and P99 fit", () => {
     const result = optimizeComputeCandidate({
       currentConfig,
       workload: {
@@ -580,20 +748,78 @@ describe("optimizeComputeCandidate", () => {
           1000
         ])
       },
-      catalog: [{ ...catalog[1], baselineIops: 150, maxIops: 200, baselineThroughputMbps: 1250 }],
+      catalog: [{ ...catalog[1], baselineIops: 200, maxIops: 200, baselineThroughputMbps: 1250 }],
       orderedCandidateInstanceClasses: ["db.r8i.2xlarge"],
       currentVcpu: 32,
       requirements: { memoryGb: 48, iops: 109, throughputMbps: 200 }
     });
 
-    assert.equal(result.recommendedConfig, undefined);
+    assert.equal(result.recommendedConfig?.instanceClass, "db.r8i.2xlarge");
     assert.equal(result.optimizationEvidence?.iopsP95, 100);
     assert.equal(result.optimizationEvidence?.iopsP99, 109);
     assert.equal(result.optimizationEvidence?.iopsMax, 1000);
-    assert.ok(result.blockers.some((blocker) => blocker.code === "IOPS_HARD_MAXIMUM_EXCEEDED"));
+    assert.ok(!result.blockers.some((blocker) => blocker.code === "IOPS_HARD_MAXIMUM_EXCEEDED"));
   });
 
-  it("blocks throughput independently when physical P95 exceeds effective capability headroom", () => {
+  it("ENG-OPTIMIZER-023: uses an alternate Optimize CPU path when a smaller candidate fails IOPS", () => {
+    const rescueCatalog: InstanceCatalogEntry[] = [
+      {
+        instanceClass: "db.r8i.8xlarge",
+        region: "us-east-1",
+        family: "r8i",
+        size: "8xlarge",
+        vcpu: 32,
+        defaultCpuCores: 16,
+        defaultThreadsPerCore: 2,
+        sqlServerDefaultVcpuSource: "aws-processor-features",
+        optimizeCpuConfigurations: [
+          { coreCount: 8, threadsPerCore: 2, sqlServerVisibleVcpu: 16, isDefault: false },
+          { coreCount: 16, threadsPerCore: 2, sqlServerVisibleVcpu: 32, isDefault: true }
+        ],
+        memoryGb: 256,
+        baselineIops: 80000,
+        maxIops: 80000,
+        baselineThroughputMbps: 2000,
+        maxThroughputMbps: 2000,
+        supportedEditions: ["Enterprise", "Standard"],
+        minSqlMajorVersion: 14,
+        engine: "sqlserver-se",
+        engineVersion: "16.00.4125.3.v1",
+        sqlServerEdition: "Standard",
+        orderable: true
+      },
+      {
+        ...catalog[1],
+        baselineIops: 150,
+        maxIops: 250,
+        baselineThroughputMbps: 1250
+      }
+    ];
+    const result = optimizeComputeCandidate({
+      currentConfig,
+      workload: {
+        ...workload(15),
+        physicalIo: physicalIo(Array.from({ length: 100 }, () => 200))
+      },
+      catalog: rescueCatalog,
+      orderedCandidateInstanceClasses: ["db.r8i.2xlarge", "db.r8i.8xlarge"],
+      currentVcpu: 32,
+      requirements: { memoryGb: 48, iops: 200, throughputMbps: 200 }
+    });
+
+    assert.equal(result.recommendedConfig?.instanceClass, "db.r8i.8xlarge");
+    assert.equal(result.recommendedConfig?.cpuConfigurationType, "optimize_cpu");
+    assert.equal(result.recommendedConfig?.sqlServerVisibleVcpu, 16);
+    assert.equal(result.candidateEvaluations.find((candidate) =>
+      candidate.instanceClass === "db.r8i.2xlarge"
+    )?.failedGates.includes("IOPS_P95_EFFECTIVE_CAPABILITY_EXCEEDED"), true);
+    assert.equal(result.candidateEvaluations.find((candidate) =>
+      candidate.instanceClass === "db.r8i.8xlarge"
+      && candidate.cpuConfigurationType === "optimize_cpu"
+    )?.selected, true);
+  });
+
+  it("ENG-OPTIMIZER-024: blocks throughput independently when physical P95 exceeds effective capability headroom", () => {
     const result = optimizeComputeCandidate({
       currentConfig,
       workload: {
@@ -619,7 +845,7 @@ describe("optimizeComputeCandidate", () => {
     assert.ok(!result.blockers.some((blocker) => blocker.dimension === "iops"));
   });
 
-  it("removes time-aligned tempdb demand for a Non-NVMe to NVMe candidate", () => {
+  it("ENG-OPTIMIZER-025: removes time-aligned tempdb demand for a Non-NVMe to NVMe candidate", () => {
     const placementCatalog: InstanceCatalogEntry[] = [
       {
         instanceClass: "db.r8i.8xlarge",
@@ -652,9 +878,9 @@ describe("optimizeComputeCandidate", () => {
         vcpu: 16,
         sqlServerDefaultVcpuSource: "aws-processor-features",
         memoryGb: 128,
-        baselineIops: 100,
+        baselineIops: 120,
         maxIops: 200,
-        baselineThroughputMbps: 10,
+        baselineThroughputMbps: 20,
         maxThroughputMbps: 20,
         supportedEditions: ["Standard"],
         minSqlMajorVersion: 14,
@@ -707,7 +933,7 @@ describe("optimizeComputeCandidate", () => {
     assert.equal(result.risk, "medium");
   });
 
-  it("blocks an NVMe candidate when peak tempdb allocation exceeds local capacity", () => {
+  it("ENG-OPTIMIZER-026: blocks an NVMe candidate when peak tempdb allocation exceeds local capacity", () => {
     const placementCatalog: InstanceCatalogEntry[] = [
       {
         instanceClass: "db.r8i.8xlarge",
@@ -785,7 +1011,7 @@ describe("optimizeComputeCandidate", () => {
     assert.ok(result.blockers.some((blocker) => blocker.dimension === "tempdb"));
   });
 
-  it("keeps an approved compute downsize on Enterprise when the Standard gate is blocked", () => {
+  it("ENG-OPTIMIZER-027: keeps an approved compute downsize on Enterprise when the Standard gate is blocked", () => {
     const enterpriseConfig: CurrentRdsConfig = {
       ...currentConfig,
       instanceClass: "db.r8i.8xlarge",
@@ -901,7 +1127,7 @@ describe("optimizeComputeCandidate", () => {
     ));
   });
 
-  it("changes to Standard only when every documented edition term passes", () => {
+  it("ENG-OPTIMIZER-028: changes to Standard only when every documented edition term passes", () => {
     const enterpriseConfig: CurrentRdsConfig = {
       ...currentConfig,
       sqlServerEdition: "Enterprise",

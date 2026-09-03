@@ -95,7 +95,7 @@ function result(overrides: Partial<OptimizationResult> = {}): OptimizationResult
 }
 
 describe("buildManualUploadResultsView", () => {
-  it("builds a descriptive scaled-down vs stay-as-is results view model", () => {
+  it("UI-VIEW-001: builds a descriptive scaled-down vs stay-as-is results view model", () => {
     const optimized = buildWorkloadOptimizationReport({
       serverName: "optimized-sql",
       result: result()
@@ -208,12 +208,49 @@ describe("buildManualUploadResultsView", () => {
     assert.match(view.servers[2].decisionSummary, /Stay as is on db\.r8i\.8xlarge because/);
     assert.ok(view.servers[2].whyNotOptimized.some((reason) => reason.includes("No smaller candidate has enough memory")));
     assert.ok(view.servers[2].actionPlan.some((action) => action.startsWith("Memory blocks")));
+    assert.deepEqual(view.exportActions.map((action) => action.label), [
+      "Download business PDF",
+      "Download technical CSV",
+      "Download technical JSON"
+    ]);
     assert.ok(view.exportActions.every((action) => action.available));
     assert.ok(view.exportActions.every((action) => action.href?.startsWith("data:")));
     assert.ok(view.exportActions.every((action) => action.filename?.startsWith("rds-cost-optimization.")));
   });
 
-  it("explains blocked metric cards when no candidate is selected", () => {
+  it("UI-VIEW-006: exposes business PDF plus technical CSV and JSON download labels", () => {
+    const report = buildWorkloadOptimizationReport({
+      serverName: "optimized-sql",
+      result: result()
+    });
+    const response: ManualUploadSuccessResponse = {
+      ok: true,
+      uploadCount: 1,
+      collectorInputs: [{
+        rdsEndpoint: "optimized-sql.abc123.us-east-1.rds.amazonaws.com",
+        database: "msdb",
+        existingInstanceClass: "db.r8i.8xlarge",
+        region: "us-east-1"
+      }],
+      analysis: { results: [], batch: { results: [] } },
+      reports: [report],
+      summary: buildWorkloadOptimizationSummary([report]),
+      exports: { json: "{}", csv: "serverName", pdf: "JVBERi0xLjQ=" }
+    };
+
+    const view = buildManualUploadResultsView(response);
+
+    assert.deepEqual(view.exportActions.map((action) => [action.format, action.label, action.available]), [
+      ["pdf", "Download business PDF", true],
+      ["csv", "Download technical CSV", true],
+      ["json", "Download technical JSON", true]
+    ]);
+    assert.equal(view.exportActions[0].href?.startsWith("data:application/pdf;base64,"), true);
+    assert.equal(view.exportActions[1].href?.startsWith("data:text/csv;base64,"), true);
+    assert.equal(view.exportActions[2].href?.startsWith("data:application/json;base64,"), true);
+  });
+
+  it("UI-VIEW-002: explains blocked metric cards when no candidate is selected", () => {
     const workloadEvidence: WorkloadEvidence = {
       memory: {
         requiredMemoryFloorGb: 13.35,
@@ -288,9 +325,8 @@ describe("buildManualUploadResultsView", () => {
     assert.equal(view.servers[0].candidateCpuConfiguration, "Current configuration retained");
     assert.equal(view.servers[0].optimizedTitle, "Stay As Is");
     assert.equal(view.servers[0].optimized.instanceClass, "db.r8i.8xlarge");
-    assert.ok(view.servers[0].actionPlan[0].startsWith("Stay as is on the current instance (db.r8i.8xlarge) because insufficient evidence window"));
-    assert.ok(view.servers[0].actionPlan[0].includes("Reassess only after"));
-    assert.ok(view.servers[0].actionPlan[0].includes("representative collection window of at least 7 days"));
+    assert.ok(view.servers[0].actionPlan[0].startsWith("Stay as is on db.r8i.8xlarge. Primary blocker: insufficient evidence window"));
+    assert.ok(view.servers[0].actionPlan.some((action) => action.includes("representative workload window")));
     assert.equal(view.servers[0].actionPlan.some((action) => action.includes("CPU target does not fit")), false);
     assert.equal(view.servers[0].projectedSqlCpuP95Pct, "Not projected");
     assert.equal(view.servers[0].resourceGates[0].dimension, "Evidence Check");
@@ -301,7 +337,7 @@ describe("buildManualUploadResultsView", () => {
     assert.ok(view.servers[0].ioAssessment.some((line) => line.includes("candidate sustained/maximum: No selected candidate")));
   });
 
-  it("does not show AWS-managed rdsadmin as a customer database driver", () => {
+  it("UI-VIEW-003: does not show AWS-managed rdsadmin as a customer database driver", () => {
     const report = buildWorkloadOptimizationReport({
       serverName: "prod-sql-01",
       result: result({
@@ -380,7 +416,7 @@ describe("buildManualUploadResultsView", () => {
     assert.equal(JSON.stringify(view).includes("rdsadmin"), false);
   });
 
-  it("omits not-applicable metric rows for reason-only resource gates", () => {
+  it("UI-VIEW-004: omits not-applicable metric rows for reason-only resource gates", () => {
     const report = buildWorkloadOptimizationReport({
       serverName: "blocked-sql",
       result: result({
@@ -424,7 +460,7 @@ describe("buildManualUploadResultsView", () => {
     assert.equal(view.servers[0].resourceGates[0].reason, "No selected candidate was available for CPU projection.");
   });
 
-  it("keeps large multi-server display payloads bounded and customer-facing", () => {
+  it("UI-VIEW-005: keeps large multi-server display payloads bounded and customer-facing", () => {
     const manyCandidates = Array.from({ length: 60 }, (_, index) => ({
       instanceClass: `db.r8i.${index + 1}xlarge`,
       sqlServerVisibleVcpu: 64 - index,

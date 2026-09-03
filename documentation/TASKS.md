@@ -358,11 +358,147 @@ Source: Sections 3 through 10 and the Final Verified Kentra Algorithm.
 - [x] Add regression coverage for every correction above.
 - [x] Update the verified requirements matrix only after production, harness, collector, samples, and tests prove each correction.
 
+## Task 19 - Catalog-Owned Candidate Family Preference Metadata
+
+Source: User-approved hardcoding audit follow-up; `COST_OPTIMIZATION_END_TO_END_SPEC.md` Section 7 Candidate Catalog; `ARCHITECTURE.md` Working Sizing Rule Architecture and Candidate Catalog; `HARNESS_CONTRACT.md` Change Rule.
+
+- [x] Move mutable instance-family preference and fallback metadata out of hardcoded production and harness family arrays.
+- [x] Extend the candidate catalog or a versioned catalog-adjacent configuration with approved family preference metadata, such as lead, fallback, avoid, deprecated, or rank fields.
+- [x] Keep AWS capability facts in the generated catalog: Region, edition, exact engine version, SQL Server-visible vCPU, Optimize CPU configurations, memory, sustained/burst IOPS, sustained/burst throughput, Multi-AZ, local-instance-store, and normalized per-core capacity when available.
+- [x] Keep verified algorithm thresholds hardcoded or spec-owned; do not move CPU, memory, IOPS, throughput, evidence-window, or memory-coupling thresholds into mutable AWS catalog data.
+- [x] Update candidate generation and accepted-candidate ordering to read family preference from catalog/config metadata rather than hardcoded arrays.
+- [x] Update the independent harness with separate validation code that checks preserved candidate ordering against the same approved catalog/config metadata without importing production optimizer logic.
+- [x] Add regression coverage proving that a family preference change can be made in catalog/config metadata without editing production ordering code or harness hardcoded family arrays.
+- [x] Preserve deterministic candidate ordering and explain fallback-family selection when no equal-or-better preferred family path is orderable or when preferred-family candidates fail preserved workload gates.
+
+## Task 20 - Manual Catalog Refresh and New Offering Detection
+
+Source: User-approved catalog refresh operations follow-up; `COST_OPTIMIZATION_END_TO_END_SPEC.md` Section 7 Candidate Catalog; `ARCHITECTURE.md` Candidate Catalog; `HARNESS_CONTRACT.md` Change Rule.
+
+- [x] Add a manual catalog refresh workflow that runs `npm run catalog:refresh` for the approved Region list.
+- [x] Keep catalog refresh changes versioned and reviewed; do not silently refresh catalog data at production request time.
+- [x] Generate a refresh summary that reports catalog entry count deltas, new instance families/classes, removed or no-longer-orderable classes, changed SQL Server-visible vCPU or Optimize CPU configurations, changed memory, changed sustained/burst IOPS, changed sustained/burst throughput, and changed local-instance-store/tempdb facts.
+- [x] Run the full project verification path after refresh, including catalog, optimizer, harness, server, and gold-sample regression coverage.
+- [x] Open a reviewable change when refreshed catalog output differs from the committed catalog.
+- [x] Require human review before refreshed catalog data can affect production optimization outcomes.
+- [x] Preserve exact AWS SQL Server processor metadata requirements: entries without AWS SQL Server-visible CPU/core/thread provenance must remain excluded from runtime candidates.
+- [x] Keep the approved Region list explicit and auditable instead of relying only on a default fallback Region.
+
+## Task 21 - Rules-Based Regression Suite Setup
+
+Source: User-approved rules-suite follow-up; `documentation/RULES_BASED_SUITE_SPEC.md`; `HARNESS_CONTRACT.md` Change Rule.
+
+- [x] Create `documentation/rules-migration-map.md` by enumerating every `it(...)` and distinct assertion across the existing 19 test files, mapping each old test behavior to a stable rule id.
+- [x] Create `documentation/rules.md` with exactly the required columns: `id | area | status | invariant | input/fixture | expected | pins`.
+- [x] Populate `documentation/rules.md` with every migrated behavior from the current suite plus the seed parser, fuzz, and gold-fixture rules defined in `documentation/RULES_BASED_SUITE_SPEC.md`.
+- [x] Add rule-tagged tests whose titles start with their rule id and cover every `enforced` and `expected-gap` rule.
+- [x] Add the rules coverage-guard test so orphan rules, orphan rule-tagged tests, unexpected passing `expected-gap` rules, and missing enforced coverage fail CI.
+- [x] Document GOLD-11 through GOLD-14 as `expected-gap` fixture rules until approved source collector packages exist; commit `samples/tool-regression/CHECKSUMS.txt` with SHA-256 hashes for the current gold ZIPs.
+- [x] Retire or fold superseded old tests only after the migration map proves 100% coverage and the rules coverage guard is green.
+- [x] Keep this as a test/fixture/spec restructure only; do not change engine behavior in `src/optimizer`, `src/io`, `src/memory`, `src/edition`, `src/catalog`, `src/parser`, or `src/harness` logic while implementing this task.
+- [x] Verify `npm test` is green on Windows after the rule suite migration.
+
+## Task 22 - Customer-Facing Next Action Summary Cleanup
+
+Source: User-approved report wording follow-up; `COST_OPTIMIZATION_END_TO_END_SPEC.md` Section 17 Reports; `ARCHITECTURE.md` Reports and UI; `documentation/rules.md` Rules Contract Usage.
+
+- [x] Replace verbose repeated candidate-failure text in the customer-facing `Next Action` section with one concise note that states the action, current class, primary blocker, observed demand, and applicable safe capacity.
+- [x] Audit the report/UI output for duplicated blocker details between `Next Action`, resource gates, candidate history, and technical evidence.
+- [x] Keep detailed per-candidate failure evidence available in candidate history or technical evidence; do not remove auditability.
+- [x] Add or update the corresponding `RPT-*` or `UI-*` rule in `documentation/rules.md`.
+- [x] Add a rule-tagged regression test proving repeated IOPS/throughput/CPU/memory candidate failures are summarized once in `Next Action` while detailed evidence remains available elsewhere.
+- [x] Avoid the word `recommend` and variants in any new user-facing wording unless quoting existing enums or file content.
+- [x] Run the required Windows verification path after the wording change.
+
+## Task 23 - Downloadable Business PDF and Technical CSV/JSON Exports
+
+Source: User-approved export follow-up; `COST_OPTIMIZATION_END_TO_END_SPEC.md` Section 17 Reports; `ARCHITECTURE.md` Reports and UI; `documentation/rules.md` Rules Contract Usage.
+
+- [x] Provide clear download actions for PDF, CSV, and JSON from the analysis results view.
+- [x] Keep CSV and JSON exports technical and complete: current configuration, selected configuration when present, resource gates, limiting resources, blockers, candidate history, database drivers, harness findings, and preserved evidence references.
+- [x] Make the PDF business-oriented: executive summary, workload outcome, current versus optimized/as-is position, top blockers or opportunities, and concise next action.
+- [x] Include before/after cost and total cost savings in the PDF only after an approved pricing source, calculation method, currency, time horizon, and treatment of licenses/RI/Savings Plans/region are documented and covered by rules/tests.
+- [x] If pricing approval is not available, the PDF must clearly state that pricing is not included and must not show total savings, cost charts, or dollar claims.
+- [x] Add a business visual section to the PDF, such as a pie chart or before/after chart, only when backed by approved cost data; otherwise use non-financial workload visuals such as outcome mix or blocker category distribution.
+- [x] Add or update corresponding `RPT-*`, `UI-*`, and export rules in `documentation/rules.md`.
+- [x] Add rule-tagged tests proving the PDF, CSV, and JSON downloads are available and that pricing claims are absent unless the approved pricing model is present.
+- [x] Keep storage provisioning, RI/Savings Plans, and automated RDS changes out of scope unless separately approved.
+- [x] Run the required Windows verification path after implementation.
+
+## Task 24 - Storage Optimization Scope and Evidence Contract
+
+Source: User-approved storage optimization follow-up for io2/io1 to gp3 assessment when EBS/RDS storage facts are provided in the Excel sheet; existing scope boundary in `COST_OPTIMIZATION_END_TO_END_SPEC.md` Section 2 is superseded only for this new task after spec/rule updates are approved.
+
+- [ ] Update `COST_OPTIMIZATION_END_TO_END_SPEC.md`, `MVP_SPEC.md`, and `ARCHITECTURE.md` to add storage optimization as a separate assessment track from compute optimization.
+- [ ] Define required Excel/current-configuration fields for storage assessment: storage type, allocated storage GiB, provisioned IOPS, provisioned throughput, Multi-AZ, Region, current RDS instance class, SQL Server edition, and exact engine version.
+- [ ] Define required collector evidence for storage assessment: synchronized read/write IOPS P95/P99/max, read/write throughput P95/P99/max, file stall latency or equivalent read/write latency evidence when available, burst duration/frequency, and top database/file attribution.
+- [ ] Define supported storage outcomes: `Storage optimized`, `Storage validation required`, and `Storage as is`.
+- [ ] Define that compute optimization and storage optimization are reported separately, with combined savings only after both tracks are independently safe and pricing is approved.
+- [ ] Preserve current storage design as the default unless the storage assessment track explicitly passes every approved gate.
+- [ ] Keep automated RDS storage modification out of scope; output is assessment and planning guidance only.
+- [ ] Add corresponding `STORAGE-*`, `RPT-*`, and `UI-*` rules to `documentation/rules.md` before implementation.
+- [ ] Add regression fixtures covering io2-to-gp3 safe fit, io2-to-gp3 latency validation required, io2-to-gp3 capacity blocked, gp3 already right-sized, and missing storage facts.
+- [ ] Reconcile the existing documentation conflict between optional storage context and fail-closed storage capability behavior before production readiness sign-off.
+
+## Task 25 - io2/io1 to gp3 Storage Fit Engine
+
+Source: User-approved storage optimization follow-up; depends on Task 24 evidence contract and rule updates.
+
+- [ ] Build a storage assessment module that evaluates current io2/io1/gp3 storage independently from compute candidate selection.
+- [ ] For io2/io1 to gp3, keep allocated storage the same or higher; never propose reducing allocated storage.
+- [ ] Calculate the smallest gp3 target that satisfies approved IOPS and throughput headroom using observed P95/P99 demand and burst evidence.
+- [ ] Validate gp3 service limits, storage-size limits, IOPS-to-GiB limits, throughput-to-IOPS limits, and RDS SQL Server supported storage constraints from the approved storage catalog.
+- [ ] Validate the selected RDS instance class can deliver the proposed gp3 IOPS and throughput; do not approve a gp3 target above instance-level usable capability.
+- [ ] Add a latency guard: if io2 latency evidence is missing, borderline, or latency-sensitive behavior cannot be proven safe on gp3, return `Storage validation required` rather than `Storage optimized`.
+- [ ] Preserve top database/file storage drivers in the technical evidence.
+- [ ] Return `Storage as is` when gp3 cannot safely satisfy IOPS, throughput, size/ratio limits, instance limits, or latency guard.
+- [ ] Keep storage fit calculations independent from production compute optimizer formulas except for shared preserved workload evidence.
+- [ ] Add independent harness checks for storage fit so production storage outcomes are reproducible from preserved evidence.
+
+## Task 26 - Storage Optimization Reporting, Downloads, and Pricing Boundary
+
+Source: User-approved storage optimization follow-up; depends on Task 24 and Task 25.
+
+- [ ] Add a storage section to the business PDF that separates compute outcome from storage outcome.
+- [ ] Show current storage versus assessed storage target, including storage type, allocated GiB, provisioned IOPS, provisioned throughput, observed demand, safe capacity, latency status, and outcome.
+- [ ] Keep CSV and JSON technical exports complete for storage assessment: input storage facts, observed workload metrics, selected gp3 target when present, blockers, validation-required reasons, latency evidence, and top database/file drivers.
+- [ ] Do not show storage cost savings until an approved pricing source, Region, formula, currency, monthly horizon, Multi-AZ treatment, and gp3/io1/io2 pricing rules are documented and covered by tests.
+- [ ] When pricing is not approved, clearly state that storage fit is technical only and no dollar savings are shown.
+- [ ] Once pricing is approved, show storage savings separately from compute savings and show combined savings only as a sum of separately approved components.
+- [ ] Add UI download/actions wording for storage assessment without implying automated storage modification.
+- [ ] Add tests proving business PDF, CSV, JSON, and UI present storage optimization safely and avoid pricing claims until pricing is approved.
+
+## Task 27 - Customer-Run AWS CLI CloudWatch Evidence Package
+
+Source: User-approved CloudWatch-only fallback follow-up for customers who choose not to run the SQL Server in-database collector; this task defines a collector-driven, customer-run AWS CLI evidence package flow and does not authorize the tool to extract AWS data directly.
+
+Reference analysis (complete): `documentation/CLOUDWATCH_METRIC_MAPPING.md` — collector→CloudWatch/Enhanced Monitoring/Performance Insights field mapping, gate-by-gate feasibility, confidence prerequisites, and the collector-only evidence gaps.
+
+Command runbook (complete): `documentation/CLOUDWATCH_CLI_EVIDENCE_RUNBOOK.md` — collector-driven, customer-run read-only AWS CLI command pack, ZIP package layout + manifest, and confidence tiers. Confirmed direction: the tool does not extract AWS data; the customer starts from the collector workflow, runs the CloudWatch fallback commands, and uploads the resulting ZIP.
+
+Delivered collector fallback package (complete): `documentation/cloudwatch-cli/` — Windows one-click package (`RunMe.bat` + `collect-cloudwatch-evidence.ps1` + `README.md`) to be driven from the collector workflow. Read-only; auto-discovers every RDS SQL Server instance across all enabled regions and produces one fleet ZIP. Windows-only for now, matching the existing collector's PowerShell/`.bat` pattern.
+
+- [x] Deliver a Windows one-click, read-only fleet collector that auto-discovers all RDS SQL Server instances across all enabled regions and packages them into one ZIP with a fleet manifest (`region/db-id` layout). (cloudwatch-cli package)
+- [x] Document prerequisites, usage, how-it-works, and a least-privilege read-only IAM policy for the collector. (`documentation/cloudwatch-cli/README.md`)
+- [x] Define this as a collector-driven fallback assessment path, not a collector replacement or standalone product path: customer starts from the collector workflow, runs provided AWS CLI commands, creates a ZIP package from the command outputs, and uploads that ZIP for analysis. (runbook §0)
+- [x] Provide documented AWS CLI command templates for RDS instance metadata, CloudWatch metrics, Enhanced Monitoring metrics when enabled, Performance Insights metrics/counters when enabled, and storage configuration facts. (runbook §3–§6)
+- [x] Keep credentials outside the uploaded package; CLI commands must write only non-secret JSON/CSV metric and metadata outputs. (runbook §9)
+- [x] Define required package layout and manifest fields: DB instance identifier, Region, collection start/end timestamps, metric period, timezone/UTC convention, AWS account redaction guidance, and command version. (runbook §7)
+- [x] Map CloudWatch basic metrics to evidence needs: CPU utilization, free memory, read/write IOPS, read/write throughput, read/write latency, disk queue depth, free storage, and SQL Server tempdb CloudWatch metrics when available. (documented in `CLOUDWATCH_METRIC_MAPPING.md`)
+- [x] Map Enhanced Monitoring metrics to optional evidence needs: OS CPU, memory, disk, and process-level fields where available. (documented in `CLOUDWATCH_METRIC_MAPPING.md`)
+- [x] Map Performance Insights metrics/counters to optional SQL Server evidence needs: DB load, waits, Batch Requests/sec, Page life expectancy, Memory Grants Pending, Buffer Cache Hit Ratio, and other approved SQL Server counters where available. (documented in `CLOUDWATCH_METRIC_MAPPING.md`)
+- [x] Define confidence levels for CloudWatch package assessments: basic CloudWatch only, CloudWatch plus Enhanced Monitoring, CloudWatch plus Performance Insights, and CloudWatch plus both. (runbook §8)
+- [x] Explicitly mark CloudWatch-only findings as incomplete when they cannot reproduce collector evidence such as per-file DMV counters, SQL Server feature/edition audit, exact per-database physical I/O attribution, memory working-set validation, or full tempdb remap evidence. (`CLOUDWATCH_METRIC_MAPPING.md`, `CLOUDWATCH_CLI_EVIDENCE_RUNBOOK.md`, `CW-004`, `CW-006`)
+- [x] Ensure CloudWatch-only results use cautious wording and outcomes such as `CloudWatch optimized`, `CloudWatch validation required`, and `CloudWatch as is` only after those names are approved in rules. (`CW-005`)
+- [x] Add future `CW-*` rules and tests before implementing upload parsing or production assessment behavior. (`CW-001` through `CW-006`; expected-gap todo tests)
+- [ ] Test the CloudWatch CLI package as a standalone collector fallback before any app upload parsing, production assessment behavior, or collector workflow integration is implemented. Minimum test gates: PowerShell syntax, launcher path, read-only AWS command inventory, generated ZIP/manifest layout, no credentials in output, and at least one dry-run or fixture-driven package validation. (`CW-007`)
+- [x] Keep automated AWS API extraction out of scope unless separately approved; the app consumes only the uploaded ZIP produced by the customer-run commands. (confirmed: tool does not extract AWS data)
+
 ## Deferred by the Verified Document
 
-- [x] Keep storage provisioning optimization out of the active workload flow and reports in this phase.
+- [ ] Keep storage provisioning optimization out of the active workload flow and reports until Tasks 24 through 26 are implemented and verified.
 - [x] Do not implement detailed pricing in this phase.
-- [x] Do not add gp3/io1/io2 cost selection in this phase.
+- [ ] Do not add gp3/io1/io2 cost selection until Task 26 pricing rules are approved and implemented.
 - [x] Do not add RI/Savings Plans financial recommendations in this phase.
 - [x] Do not add automated RDS changes in this phase.
 

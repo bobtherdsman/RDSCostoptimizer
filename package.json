@@ -11,6 +11,8 @@
     "samples:generate": "node scripts/generate-tool-regression-samples.mjs",
     "build:app": "tsc -p tsconfig.app.json",
     "catalog:refresh": "npm run build:app && node dist/catalog/refresh.js",
+    "catalog:refresh:approved": "npm run build:app && node dist/catalog/refresh.js --regions-file src/catalog/data/approved-regions.json",
+    "catalog:refresh:summary": "npm run build:app && node dist/catalog/refresh-summary.js",
     "server": "npm run build:app && node dist/server/index.js",
     "dev": "npm run server"
   },

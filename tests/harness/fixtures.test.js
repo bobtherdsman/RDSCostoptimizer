@@ -14,7 +14,7 @@ function assertDistribution(value, label) {
 }
 
 describe("fixture contracts", () => {
-  it("contains the initial deterministic cases", () => {
+  it("CO-FIX-001: contains the initial deterministic cases", () => {
     assert.deepEqual(fixtureFiles.sort(), [
       "db-level-io-offender.json",
       "low-cpu-iops-blocked.json",
@@ -25,7 +25,7 @@ describe("fixture contracts", () => {
   });
 
   for (const file of fixtureFiles) {
-    it(`${file} matches the fixture envelope`, () => {
+    it(`CO-FIX-002: ${file} matches the fixture envelope`, () => {
       const fixture = JSON.parse(readFileSync(join(fixturesDir, file), "utf8"));
 
       assert.equal(typeof fixture.name, "string");

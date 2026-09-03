@@ -116,12 +116,12 @@ const toolSampleCatalog: InstanceCatalogEntry[] = toolSampleStandardCatalog.flat
 ]);
 
 describe("gold sample collector package regression fixtures", () => {
-  it("contains exactly the ten approved gold scenarios and no root legacy ZIPs", () => {
+  it("GOLD-SUITE-001: contains exactly the ten approved gold scenarios and no root legacy ZIPs", () => {
     assert.equal(sampleZipFiles.length, 0);
     assert.deepEqual(toolSampleZipFiles, sampleCases.map((sample) => sample.fileName).sort());
   });
 
-  it("uses valid collector schemas and preserves required diagnostics in every package", () => {
+  it("GOLD-SUITE-002: uses valid collector schemas and preserves required diagnostics in every package", () => {
     for (const sample of sampleCases) {
       const csvs = collectorCsvSetFromToolZip(sample.fileName);
       assert.match(firstLine(csvs.cpuCsv), /ServerName,SqlSerCpuUT,SystemIdle,OtherProCpuUT,Collectiontime/i);
@@ -154,7 +154,7 @@ describe("gold sample collector package regression fixtures", () => {
     }
   });
 
-  it("produces the exact expected recommendation or blocker for every gold scenario", async () => {
+  it("GOLD-SUITE-003: produces the exact expected recommendation or blocker for every gold scenario", async () => {
     for (const sample of sampleCases) {
       const built = await buildToolSampleUpload(sample.fileName);
       assert.equal(built.ok, true, `${sample.fileName} failed upload assembly: ${JSON.stringify(built)}`);
@@ -182,7 +182,7 @@ describe("gold sample collector package regression fixtures", () => {
     }
   });
 
-  it("covers catalog-gap fallback, missing storage facts, and tempdb-dominant advisory evidence", async () => {
+  it("GOLD-SUITE-004: covers catalog-gap fallback, missing storage facts, and tempdb-dominant advisory evidence", async () => {
     const gapBuilt = await buildToolSampleUpload("gold-09-catalog-gap-fallback.zip");
     assert.equal(gapBuilt.ok, true, JSON.stringify(gapBuilt));
     if (gapBuilt.ok) {
@@ -205,7 +205,7 @@ describe("gold sample collector package regression fixtures", () => {
     assert.equal(analyzed.reports[0].topDatabaseDrivers[0]?.databaseName, "tempdb");
   });
 
-  it("supports a multi-server upload with independent recommendation and blocker results", async () => {
+  it("GOLD-SUITE-005: supports a multi-server upload with independent recommendation and blocker results", async () => {
     const built = await buildManualUploadRequestFromMultipart({
       ownerEmail: "owner@example.com",
       requesterEmail: "owner@example.com",

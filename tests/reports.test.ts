@@ -144,7 +144,7 @@ function result(overrides: Partial<OptimizationResult> = {}): OptimizationResult
 }
 
 describe("buildWorkloadOptimizationReport", () => {
-  it("builds a workload-only recommended report without pricing claims", () => {
+  it("RPT-001: builds a workload-only recommended report without pricing claims", () => {
     const report = buildWorkloadOptimizationReport({
       serverName: "prod-sql-01",
       result: result()
@@ -178,7 +178,7 @@ describe("buildWorkloadOptimizationReport", () => {
     assert.ok(parsed.whyOptimized.some((reason: string) => reason.includes("IOPS requirement")));
   });
 
-  it("filters AWS-managed rdsadmin from customer-facing database drivers", () => {
+  it("RPT-002: filters AWS-managed rdsadmin from customer-facing database drivers", () => {
     const report = buildWorkloadOptimizationReport({
       serverName: "prod-sql-01",
       result: result({
@@ -210,7 +210,7 @@ describe("buildWorkloadOptimizationReport", () => {
     assert.equal(new TextDecoder().decode(toPdfExecutiveSummary(report)).includes("rdsadmin"), false);
   });
 
-  it("builds a blocked report with dimension-specific action plan", () => {
+  it("RPT-003: builds a blocked report with dimension-specific action plan", () => {
     const report = buildWorkloadOptimizationReport({
       result: result({
         recommendedConfig: undefined,
@@ -247,15 +247,72 @@ describe("buildWorkloadOptimizationReport", () => {
     assert.equal(report.status, "not_recommended");
     assert.equal(report.risk, "blocked");
     assert.equal(report.recommendedConfig, undefined);
-    assert.ok(report.actionPlan[0].startsWith("Stay as is on the current instance (db.r8i.8xlarge) because"));
-    assert.ok(report.actionPlan[0].includes("Reassess only after"));
+    assert.equal(report.actionPlan[0], "Stay as is on db.r8i.8xlarge. Primary blocker: memory fit or pressure failure; observed demand unavailable; safe capacity unavailable.");
     assert.ok(report.actionPlan.some((action) => action.startsWith("Memory blocks")));
     assert.ok(report.actionPlan.some((action) => action.startsWith("IOPS blocks")));
     assert.equal(report.actionPlan.some((action) => action.includes("CPU target does not fit")), false);
     assert.equal(report.actionPlan.some((action) => action.startsWith("Review top database driver")), false);
   });
 
-  it("uses specific no-optimization wording for missing evidence and orderability blockers", () => {
+  it("RPT-010: summarizes repeated candidate failures once in Next Action while retaining technical evidence", () => {
+    const repeatedMessage = [
+      "db.r8i.4xlarge Optimize CPU 7 cores: IOPS_P95_EFFECTIVE_CAPABILITY_EXCEEDED: 16423.37 > 8400",
+      "db.r8i.4xlarge Optimize CPU 7 cores: IOPS_P99_EFFECTIVE_CAPABILITY_EXCEEDED: 16483.36 > 10800",
+      "db.r8i.4xlarge Optimize CPU 6 cores: IOPS_P95_EFFECTIVE_CAPABILITY_EXCEEDED: 16423.37 > 8400"
+    ].join("; ");
+    const report = buildWorkloadOptimizationReport({
+      serverName: "blocked-sql",
+      result: result({
+        recommendedConfig: undefined,
+        decision: "Not Recommended",
+        risk: "blocked",
+        blockers: [
+          { code: "IOPS_P95_EFFECTIVE_CAPABILITY_EXCEEDED", dimension: "iops", message: repeatedMessage }
+        ],
+        limitingResources: [
+          {
+            dimension: "iops",
+            scope: "compute",
+            status: "blocking",
+            observed: 16423.37,
+            limit: 8400,
+            unit: "IOPS",
+            reason: repeatedMessage,
+            topDatabaseName: "orders",
+            topDatabaseMetric: "IOPS P95",
+            topDatabaseValue: 16423.37
+          }
+        ],
+        candidateEvaluations: [
+          {
+            instanceClass: "db.r8i.4xlarge",
+            sqlServerVisibleVcpu: 7,
+            cpuConfigurationType: "optimize_cpu",
+            cpuCoreCount: 7,
+            cpuThreadsPerCore: 1,
+            accepted: false,
+            selected: false,
+            decision: "Not Recommended",
+            passedGates: ["CPU", "MEMORY"],
+            failedGates: ["IOPS_P95_EFFECTIVE_CAPABILITY_EXCEEDED", "IOPS_P99_EFFECTIVE_CAPABILITY_EXCEEDED"],
+            limitingResources: []
+          }
+        ],
+        passedChecks: []
+      })
+    });
+
+    assert.equal(report.actionPlan[0], "Stay as is on db.r8i.8xlarge. Primary blocker: IOPS fit failure; observed demand 16423.4 IOPS; safe capacity 8400 IOPS.");
+    assert.equal(report.actionPlan[0].includes("db.r8i.4xlarge"), false);
+    assert.equal(report.actionPlan[0].includes("IOPS_P95_EFFECTIVE_CAPABILITY_EXCEEDED"), false);
+    assert.equal(report.limitingResources[0].reason, repeatedMessage);
+    assert.equal(report.candidateEvaluations[0].failedGates.includes("IOPS_P95_EFFECTIVE_CAPABILITY_EXCEEDED"), true);
+    const csv = toCsvReport(report);
+    assert.ok(csv.includes("db.r8i.4xlarge"));
+    assert.ok(csv.includes("IOPS_P95_EFFECTIVE_CAPABILITY_EXCEEDED"));
+  });
+
+  it("RPT-004: uses specific no-optimization wording for missing evidence and orderability blockers", () => {
     const report = buildWorkloadOptimizationReport({
       serverName: "blocked-sql",
       result: result({
@@ -303,17 +360,14 @@ describe("buildWorkloadOptimizationReport", () => {
 
     assert.equal(report.status, "not_recommended");
     assert.ok(report.actionPlan[0].includes("insufficient evidence window"));
-    assert.ok(report.actionPlan[0].includes("orderability or current-configuration issue"));
-    assert.ok(report.actionPlan[0].includes("current instance (db.r8i.8xlarge)"));
-    assert.ok(report.actionPlan[0].includes("representative collection window of at least 7 days"));
-    assert.ok(report.actionPlan[0].includes("endpoint, Region, SQL Server version, edition, current RDSSize, or orderability evidence"));
+    assert.ok(report.actionPlan[0].includes("Stay as is on db.r8i.8xlarge"));
     assert.ok(report.actionPlan.some((action) => action.includes("collect a longer representative workload window")));
     assert.ok(report.actionPlan.some((action) => action.includes("provide the endpoint, Region, current RDSSize")));
     assert.equal(report.actionPlan.some((action) => action.includes("rdsadmin")), false);
     assert.equal(toCsvReport(report).includes("Review top database driver"), false);
   });
 
-  it("surfaces structured memory, wait, file latency, and tempdb advisory evidence", () => {
+  it("RPT-005: surfaces structured memory, wait, file latency, and tempdb advisory evidence", () => {
     const report = buildWorkloadOptimizationReport({
       serverName: "prod-sql-01",
       result: result({
@@ -382,7 +436,7 @@ describe("buildWorkloadOptimizationReport", () => {
     assert.equal(report.supportingEvidence.some((signal) => signal.includes("rdsadmin")), false);
   });
 
-  it("reports a blocked Standard opportunity separately while keeping the Enterprise downsize", () => {
+  it("RPT-006: reports a blocked Standard opportunity separately while keeping the Enterprise downsize", () => {
     const enterpriseConfig: CurrentRdsConfig = {
       ...currentConfig,
       sqlServerEdition: "Enterprise"
@@ -427,7 +481,7 @@ describe("buildWorkloadOptimizationReport", () => {
     assert.ok(toCsvReport(report).includes("feature:ENTERPRISE_FEATURE_NOT_SUPPORTED_BY_STANDARD"));
   });
 
-  it("exports one or many workload reports as CSV", () => {
+  it("RPT-007: exports one or many workload reports as CSV", () => {
     const recommended = buildWorkloadOptimizationReport({
       serverName: "prod-sql-01",
       result: result()
@@ -460,7 +514,7 @@ describe("buildWorkloadOptimizationReport", () => {
     assert.ok(lines[2].includes("memory:MEMORY_UNDERFIT"));
   });
 
-  it("exports a dependency-free PDF executive summary", () => {
+  it("RPT-008: exports a business-presented PDF with non-financial charts and no pricing claims", () => {
     const report = buildWorkloadOptimizationReport({
       serverName: "prod-sql-01",
       result: result()
@@ -471,14 +525,22 @@ describe("buildWorkloadOptimizationReport", () => {
 
     assert.ok(pdf.length > 500);
     assert.ok(text.startsWith("%PDF-1.4"));
-    assert.ok(text.includes("RDS SQL Server Workload Optimization Executive Summary"));
-    assert.ok(text.includes("Pricing is deferred"));
-    assert.ok(text.includes("Outcome: Scaled down to db.r8i.4xlarge"));
-    assert.ok(text.includes("Why scaled down"));
+    assert.ok(text.includes("Executive Decision Summary"));
+    assert.ok(text.includes("Business Decision"));
+    assert.ok(text.includes("Pricing is not included"));
+    assert.ok(text.includes("Scaled down to db.r8i.4xlarge"));
+    assert.ok(text.includes("Outcome mix chart"));
+    assert.ok(text.includes("Optimization shape"));
+    assert.ok(text.includes("Workload gate snapshot"));
+    assert.ok(text.includes("Meaningful business signals"));
+    assert.ok(text.includes("Next Action"));
+    assert.ok(text.includes("Proceed with controlled validation for db.r8i.4xlarge"));
+    assert.equal(text.includes("Review the optimized target as workload-fit only"), false);
+    assert.equal(/total cost savings|monthly savings|\$/.test(text.toLowerCase()), false);
     assert.ok(text.includes("%%EOF"));
   });
 
-  it("builds a descriptive scaled-down vs stay-as-is fleet summary", () => {
+  it("RPT-009: builds a descriptive scaled-down vs stay-as-is fleet summary", () => {
     const recommended = buildWorkloadOptimizationReport({
       serverName: "optimized-sql",
       result: result()

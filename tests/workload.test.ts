@@ -88,7 +88,7 @@ function workload(cpuP95: number, iopsP95 = 6000, throughputP95 = 200): Workload
 }
 
 describe("analyzeServerWorkload", () => {
-  it("runs compute, independent harness, and report assembly for one server", () => {
+  it("ENG-WORKLOAD-001: runs compute, independent harness, and report assembly for one server", () => {
     const result = analyzeServerWorkload({
       serverName: "prod-sql-01",
       currentConfig,
@@ -112,7 +112,31 @@ describe("analyzeServerWorkload", () => {
     assert.equal("storageRecommendation" in result, false);
   });
 
-  it("fails closed when current storage provisioning facts are missing", () => {
+  it("ENG-WORKLOAD-002: keeps pricing unavailable from blocking a technical optimization result", () => {
+    const result = analyzeServerWorkload({
+      serverName: "pricing-deferred-sql",
+      currentConfig,
+      workload: workload(10),
+      currentVcpu: 32,
+      orderedCandidateInstanceClasses: ["db.r8i.4xlarge"],
+      requirements: {
+        memoryGb: 96,
+        iops: 6000,
+        throughputMbps: 200
+      }
+    }, catalog);
+    const serializedReport = JSON.stringify(result.report);
+
+    assert.equal(result.computeResult.recommendedConfig?.instanceClass, "db.r8i.4xlarge");
+    assert.notEqual(result.workloadResult.decision, "Not Recommended");
+    assert.equal(result.report.pricingDeferred, true);
+    assert.match(result.report.pricingNote, /Pricing is deferred/);
+    assert.equal("monthlySavings" in result.report, false);
+    assert.equal("annualSavings" in result.report, false);
+    assert.equal(/monthly savings|annual savings/i.test(serializedReport), false);
+  });
+
+  it("ENG-WORKLOAD-003: fails closed when current storage provisioning facts are missing", () => {
     const result = analyzeServerWorkload({
       serverName: "prod-sql-01",
       currentConfig: {
@@ -141,7 +165,7 @@ describe("analyzeServerWorkload", () => {
 });
 
 describe("analyzeWorkloadBatch", () => {
-  it("preserves per-server results for multi-server uploads", () => {
+  it("ENG-WORKLOAD-004: preserves per-server results for multi-server uploads", () => {
     const result = analyzeWorkloadBatch({
       catalog,
       servers: [

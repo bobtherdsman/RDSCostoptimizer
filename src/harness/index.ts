@@ -213,6 +213,7 @@ function expectedCpuState(context: CostHarnessContext): CpuState {
 
 function cpuProjectionFits(result: OptimizationResult): boolean {
   const evidence = result.optimizationEvidence;
+  const crossFamilyValidationRequired = evidence?.cpuProjectionBasis === "unadjusted_cross_family";
   return evidence?.cpuP95TargetPct === VERIFIED_CPU_P95_TARGET_PCT
     && evidence.cpuP99SafetyLimitPct === VERIFIED_CPU_P99_SAFETY_LIMIT_PCT
     && evidence.totalCpuP99HardLimitPct === VERIFIED_TOTAL_CPU_P99_HARD_LIMIT_PCT
@@ -221,12 +222,13 @@ function cpuProjectionFits(result: OptimizationResult): boolean {
     && evidence.projectedSqlCpuP99Pct !== undefined
     && evidence.projectedSqlCpuP99Pct <= VERIFIED_CPU_P99_SAFETY_LIMIT_PCT
     && evidence.projectedTotalCpuP99Pct !== undefined
-    && evidence.projectedTotalCpuP99Pct <= VERIFIED_TOTAL_CPU_P99_HARD_LIMIT_PCT;
+    && evidence.projectedTotalCpuP99Pct <= VERIFIED_TOTAL_CPU_P99_HARD_LIMIT_PCT
+    && (!crossFamilyValidationRequired || result.decision !== "Recommended");
 }
 
 function cpuProjectionMessage(result: OptimizationResult): string {
   const evidence = result.optimizationEvidence;
-  return `Projected SQL CPU P95=${evidence?.projectedSqlCpuP95Pct ?? "missing"}% (verified limit ${VERIFIED_CPU_P95_TARGET_PCT}%; reported ${evidence?.cpuP95TargetPct ?? "missing"}%), SQL CPU P99=${evidence?.projectedSqlCpuP99Pct ?? "missing"}% (verified limit ${VERIFIED_CPU_P99_SAFETY_LIMIT_PCT}%; reported ${evidence?.cpuP99SafetyLimitPct ?? "missing"}%), total CPU P99=${evidence?.projectedTotalCpuP99Pct ?? "missing"}% (verified limit ${VERIFIED_TOTAL_CPU_P99_HARD_LIMIT_PCT}%; reported ${evidence?.totalCpuP99HardLimitPct ?? "missing"}%).`;
+  return `Projected SQL CPU P95=${evidence?.projectedSqlCpuP95Pct ?? "missing"}% (verified limit ${VERIFIED_CPU_P95_TARGET_PCT}%; reported ${evidence?.cpuP95TargetPct ?? "missing"}%), SQL CPU P99=${evidence?.projectedSqlCpuP99Pct ?? "missing"}% (verified limit ${VERIFIED_CPU_P99_SAFETY_LIMIT_PCT}%; reported ${evidence?.cpuP99SafetyLimitPct ?? "missing"}%), total CPU P99=${evidence?.projectedTotalCpuP99Pct ?? "missing"}% (verified limit ${VERIFIED_TOTAL_CPU_P99_HARD_LIMIT_PCT}%; reported ${evidence?.totalCpuP99HardLimitPct ?? "missing"}%); basis=${evidence?.cpuProjectionBasis ?? "missing"}; decision=${result.decision}.`;
 }
 
 function memoryProjectionFits(result: OptimizationResult, candidateMemoryGb: number, fallbackRequiredMemoryGb: number): boolean {
@@ -250,13 +252,18 @@ function iopsProjectionFits(
   if (evidence?.iopsP95 === undefined || evidence.iopsP99 === undefined) {
     return false;
   }
-  const effective = effectiveCapability(
-    evidence.candidateBaselineIops ?? entry.baselineIops ?? entry.maxIops,
+  const effectiveSustained = effectiveCapability(
+    evidence.candidateBaselineIops ?? entry.baselineIops,
     result.currentConfig.provisionedIops
   );
-  return effective !== undefined
-    && evidence.iopsP95 <= effective * VERIFIED_IO_P95_HEADROOM
-    && evidence.iopsP99 <= effective * VERIFIED_IO_P99_HEADROOM;
+  const effectiveBurst = effectiveCapability(
+    evidence.candidateMaximumIops ?? entry.maxIops,
+    result.currentConfig.provisionedIops
+  );
+  return effectiveSustained !== undefined
+    && effectiveBurst !== undefined
+    && evidence.iopsP95 <= effectiveSustained * VERIFIED_IO_P95_HEADROOM
+    && evidence.iopsP99 <= effectiveBurst * VERIFIED_IO_P99_HEADROOM;
 }
 
 function iopsProjectionMessage(
@@ -267,11 +274,15 @@ function iopsProjectionMessage(
   if (evidence?.iopsP95 === undefined || evidence.iopsP99 === undefined) {
     return "Physical cumulative I/O P95/P99 evidence is required; a maximum-only IOPS fallback is not permitted.";
   }
-  const effective = effectiveCapability(
-    evidence.candidateBaselineIops ?? entry.baselineIops ?? entry.maxIops,
+  const effectiveSustained = effectiveCapability(
+    evidence.candidateBaselineIops ?? entry.baselineIops,
     result.currentConfig.provisionedIops
   );
-  return `Physical IOPS P95/P99=${evidence.iopsP95}/${evidence.iopsP99}; effective capability=${effective ?? "missing"}; required limits=${effective === undefined ? "missing" : `${effective * VERIFIED_IO_P95_HEADROOM}/${effective * VERIFIED_IO_P99_HEADROOM}`}.`;
+  const effectiveBurst = effectiveCapability(
+    evidence.candidateMaximumIops ?? entry.maxIops,
+    result.currentConfig.provisionedIops
+  );
+  return `Physical IOPS P95/P99=${evidence.iopsP95}/${evidence.iopsP99}; effective sustained/burst capability=${effectiveSustained ?? "missing"}/${effectiveBurst ?? "missing"}; required limits=${effectiveSustained === undefined || effectiveBurst === undefined ? "missing" : `${effectiveSustained * VERIFIED_IO_P95_HEADROOM}/${effectiveBurst * VERIFIED_IO_P99_HEADROOM}`}.`;
 }
 
 function throughputProjectionFits(
@@ -282,13 +293,18 @@ function throughputProjectionFits(
   if (evidence?.throughputP95 === undefined || evidence.throughputP99 === undefined) {
     return false;
   }
-  const effective = effectiveCapability(
-    evidence.candidateBaselineThroughputMbps ?? entry.baselineThroughputMbps ?? entry.maxThroughputMbps,
+  const effectiveSustained = effectiveCapability(
+    evidence.candidateBaselineThroughputMbps ?? entry.baselineThroughputMbps,
     result.currentConfig.provisionedThroughputMbps
   );
-  return effective !== undefined
-    && evidence.throughputP95 <= effective * VERIFIED_IO_P95_HEADROOM
-    && evidence.throughputP99 <= effective * VERIFIED_IO_P99_HEADROOM;
+  const effectiveBurst = effectiveCapability(
+    evidence.candidateMaximumThroughputMbps ?? entry.maxThroughputMbps,
+    result.currentConfig.provisionedThroughputMbps
+  );
+  return effectiveSustained !== undefined
+    && effectiveBurst !== undefined
+    && evidence.throughputP95 <= effectiveSustained * VERIFIED_IO_P95_HEADROOM
+    && evidence.throughputP99 <= effectiveBurst * VERIFIED_IO_P99_HEADROOM;
 }
 
 function throughputProjectionMessage(
@@ -299,11 +315,15 @@ function throughputProjectionMessage(
   if (evidence?.throughputP95 === undefined || evidence.throughputP99 === undefined) {
     return "Physical cumulative byte-counter P95/P99 evidence is required; a maximum-only throughput fallback is not permitted.";
   }
-  const effective = effectiveCapability(
-    evidence.candidateBaselineThroughputMbps ?? entry.baselineThroughputMbps ?? entry.maxThroughputMbps,
+  const effectiveSustained = effectiveCapability(
+    evidence.candidateBaselineThroughputMbps ?? entry.baselineThroughputMbps,
     result.currentConfig.provisionedThroughputMbps
   );
-  return `Physical throughput P95/P99=${evidence.throughputP95}/${evidence.throughputP99} MiB/s; effective capability=${effective ?? "missing"} MiB/s; required limits=${effective === undefined ? "missing" : `${effective * VERIFIED_IO_P95_HEADROOM}/${effective * VERIFIED_IO_P99_HEADROOM}`} MiB/s.`;
+  const effectiveBurst = effectiveCapability(
+    evidence.candidateMaximumThroughputMbps ?? entry.maxThroughputMbps,
+    result.currentConfig.provisionedThroughputMbps
+  );
+  return `Physical throughput P95/P99=${evidence.throughputP95}/${evidence.throughputP99} MiB/s; effective sustained/burst capability=${effectiveSustained ?? "missing"}/${effectiveBurst ?? "missing"} MiB/s; required limits=${effectiveSustained === undefined || effectiveBurst === undefined ? "missing" : `${effectiveSustained * VERIFIED_IO_P95_HEADROOM}/${effectiveBurst * VERIFIED_IO_P99_HEADROOM}`} MiB/s.`;
 }
 
 function effectiveCapability(
